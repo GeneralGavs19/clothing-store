@@ -124,3 +124,6 @@ cd backend && php artisan route:list --path=api
 cd backend && php -l app/... routes/... database/...
 cd backend && DB_CONNECTION=sqlite DB_DATABASE=:memory: php artisan migrate:fresh --seed --force
 ```
+=======
+# clothing-store
+>>>>>>> e11bd316bcf717abadad904b40960d0acb5e1509
