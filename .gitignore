@@ -1,0 +1,7 @@
+.codex-tmp/
+.composer-cache/
+.npm-cache/
+backend/vendor/
+backend/storage/app/public/products/
+frontend/node_modules/
+frontend/dist/
