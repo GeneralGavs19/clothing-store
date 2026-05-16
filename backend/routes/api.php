@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\ProductController;
@@ -11,6 +12,7 @@ use App\Http\Controllers\Api\StockController;
 use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
 
+Route::get('health', HealthController::class);
 Route::post('auth/login', [AuthController::class, 'login']);
 
 Route::middleware('jwt')->group(function () {

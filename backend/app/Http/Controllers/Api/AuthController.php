@@ -10,13 +10,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
-use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
     public function login(Request $request, JwtService $jwt, ActivityLogger $logger)
     {
-        Log::info('AuthController@login payload', $request->all());
         $credentials = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
@@ -33,11 +31,22 @@ class AuthController extends Controller
         }
 
         $user->forceFill(['last_login_at' => now()])->save();
-        $logger->log('auth.login', $user, [], $request);
+
+        try {
+            $logger->log('auth.login', $user, [], $request);
+        } catch (\Throwable) {
+            // Do not block login if activity log storage fails on Railway.
+        }
 
         return response()->json([
             'token' => $jwt->issue($user),
-            'user' => $user,
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role,
+                'is_active' => $user->is_active,
+            ],
         ]);
     }
 

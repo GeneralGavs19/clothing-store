@@ -15,14 +15,16 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        User::query()->firstOrCreate([
-            'email' => env('ADMIN_EMAIL', 'admin@store.local'),
-        ], [
-            'name' => env('ADMIN_NAME', 'Store Admin'),
-            'role' => 'admin',
-            'is_active' => true,
-            'password' => bcrypt(env('ADMIN_PASSWORD', 'ChangeMe123!')),
-        ]);
+        User::query()->updateOrCreate(
+            ['email' => env('ADMIN_EMAIL', 'admin@store.local')],
+            [
+                'name' => env('ADMIN_NAME', 'Store Admin'),
+                'role' => 'admin',
+                'is_active' => true,
+                // Plain password — the User model "hashed" cast hashes it once.
+                'password' => env('ADMIN_PASSWORD', 'ChangeMe123!'),
+            ],
+        );
 
         $this->call(DemoDataSeeder::class);
     }

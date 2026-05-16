@@ -132,6 +132,12 @@ ensure_app_key() {
 
 ensure_app_key
 
+echo "==> Preparing storage directories"
+mkdir -p storage/logs storage/framework/{cache,sessions,views} bootstrap/cache
+chmod -R 775 storage bootstrap/cache 2>/dev/null || true
+
+php artisan config:clear || true
+
 echo "==> Running migrations"
 php artisan migrate --force
 
