@@ -124,6 +124,10 @@ cd backend && php artisan route:list --path=api
 cd backend && php -l app/... routes/... database/...
 cd backend && DB_CONNECTION=sqlite DB_DATABASE=:memory: php artisan migrate:fresh --seed --force
 ```
-=======
-# clothing-store
->>>>>>> e11bd316bcf717abadad904b40960d0acb5e1509
+
+## Деплой (Vercel + Railway)
+
+- Frontend (Vercel): `VITE_API_URL=https://clothing-store-production-9717.up.railway.app/api`  
+  Удалите в Vercel старую переменную `your-backend-api-url.com`, если она есть.
+- Backend (Railway): привяжите MySQL, задайте `JWT_SECRET`, `FRONTEND_URL` (домен Vercel, можно через запятую для preview).
+- Логин после seed: `admin@store.local` / `ChangeMe123!`

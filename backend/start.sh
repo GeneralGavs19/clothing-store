@@ -1,29 +1,48 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install PHP dependencies (non-interactive)
+cd "$(dirname "$0")"
+
+echo "==> Installing PHP dependencies"
 composer install --no-interaction --prefer-dist --optimize-autoloader
 
-# Ensure APP_KEY exists (safe to run multiple times)
-php artisan key:generate --force || true
+echo "==> Ensuring APP_KEY"
+php artisan key:generate --force
 
-# Run migrations and seeds if DB is reachable (ignore failures during build)
-php artisan migrate --force || true
-php artisan db:seed --force || true
+map_railway_mysql_env() {
+  if [ -n "${MYSQLHOST:-}" ]; then
+    export DB_CONNECTION=mysql
+    export DB_HOST="${MYSQLHOST}"
+    export DB_PORT="${MYSQLPORT:-3306}"
+    export DB_DATABASE="${MYSQLDATABASE:-railway}"
+    export DB_USERNAME="${MYSQLUSER:-root}"
+    export DB_PASSWORD="${MYSQLPASSWORD:-}"
+    echo "==> Using Railway MySQL: ${DB_HOST}:${DB_PORT}/${DB_DATABASE}"
+  fi
+}
 
-# Create storage symlink (ignore if exists)
-php artisan storage:link || true
+map_railway_mysql_env
 
-# Determine numeric port from $PORT (fallback to 8000)
-# Some platforms may set PORT to non-numeric values, causing PHP to error when adding offsets.
-RAW_PORT="${PORT:-8000}"
-# Extract first sequence of digits from RAW_PORT
-PORT_NUM=$(echo "$RAW_PORT" | grep -oE '[0-9]+' || true)
-if [ -z "$PORT_NUM" ]; then
-	PORT_NUM=8000
+if [ "${APP_ENV:-production}" = "production" ]; then
+  export APP_DEBUG="${APP_DEBUG:-false}"
+  export SESSION_DRIVER="${SESSION_DRIVER:-file}"
+  export CACHE_STORE="${CACHE_STORE:-file}"
+  export QUEUE_CONNECTION="${QUEUE_CONNECTION:-sync}"
 fi
 
-echo "Starting server on port $PORT_NUM"
+echo "==> Running migrations"
+php artisan migrate --force
 
-# Start the app using an explicit numeric port
-php artisan serve --host=0.0.0.0 --port="$PORT_NUM"
+echo "==> Seeding database (idempotent)"
+php artisan db:seed --force
+
+php artisan storage:link || true
+
+RAW_PORT="${PORT:-8000}"
+PORT_NUM=$(echo "$RAW_PORT" | grep -oE '[0-9]+' || true)
+if [ -z "$PORT_NUM" ]; then
+  PORT_NUM=8000
+fi
+
+echo "==> Starting Laravel on port ${PORT_NUM}"
+exec php artisan serve --host=0.0.0.0 --port="${PORT_NUM}"

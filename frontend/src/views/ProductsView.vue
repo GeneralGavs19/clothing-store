@@ -152,6 +152,7 @@
 import { computed, h, onMounted, reactive, ref } from 'vue'
 import { icons } from '../plugins/icons'
 import { apiError } from '../api/client'
+import { resolveApiOrigin } from '../config/api'
 import { useAuthStore } from '../stores/auth'
 import { useCatalogStore } from '../stores/catalog'
 import { useToastStore } from '../stores/toasts'
@@ -192,7 +193,7 @@ const filters = reactive({ search: '', category_id: '', status: '', sort: 'updat
 const form = reactive(emptyForm())
 let debounce
 
-const apiBase = computed(() => (import.meta.env.VITE_API_URL || 'http://localhost:8000/api').replace('/api', ''))
+const apiBase = computed(() => resolveApiOrigin())
 
 function emptyForm() {
   return { name: '', sku: '', category_id: '', description: '', purchase_price: 0, sale_price: 0, stock_quantity: 0, display_quantity: 0, low_stock_threshold: 5, photo: null }
