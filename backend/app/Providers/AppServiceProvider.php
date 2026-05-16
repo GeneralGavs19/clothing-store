@@ -23,27 +23,27 @@ class AppServiceProvider extends ServiceProvider
     }
 
     /**
-     * Map Railway MySQL plugin variables (or DATABASE_URL) to Laravel DB config.
+     * Map Railway MySQL variables to Laravel (uses getenv — works with config cache).
      */
     private function configureRailwayDatabase(): void
     {
-        $host = env('MYSQLHOST') ?: env('MYSQL_HOST');
+        $host = getenv('MYSQLHOST') ?: getenv('MYSQL_HOST') ?: false;
         if ($host) {
             $this->applyMysqlConfig(
                 $host,
-                (string) env('MYSQLPORT', env('MYSQL_PORT', '3306')),
-                (string) env('MYSQLDATABASE', env('MYSQL_DATABASE', 'railway')),
-                (string) env('MYSQLUSER', env('MYSQL_USER', 'root')),
-                (string) env('MYSQLPASSWORD', env('MYSQL_PASSWORD', '')),
+                getenv('MYSQLPORT') ?: getenv('MYSQL_PORT') ?: '3306',
+                getenv('MYSQLDATABASE') ?: getenv('MYSQL_DATABASE') ?: 'railway',
+                getenv('MYSQLUSER') ?: getenv('MYSQL_USER') ?: 'root',
+                getenv('MYSQLPASSWORD') ?: getenv('MYSQL_PASSWORD') ?: '',
             );
 
             return;
         }
 
-        $url = env('DATABASE_URL')
-            ?: env('MYSQL_URL')
-            ?: env('MYSQL_PUBLIC_URL')
-            ?: env('MYSQL_PRIVATE_URL');
+        $url = getenv('DATABASE_URL')
+            ?: getenv('MYSQL_URL')
+            ?: getenv('MYSQL_PUBLIC_URL')
+            ?: getenv('MYSQL_PRIVATE_URL');
 
         if (! $url) {
             return;

@@ -91,26 +91,46 @@ if [ "${APP_ENV:-production}" = "production" ]; then
 fi
 
 ensure_env_file() {
-  if [ -f .env ]; then
+  if [ ! -f .env ]; then
+    echo "==> Creating .env from Railway environment variables"
+    {
+      printf 'APP_NAME="%s"\n' "${APP_NAME:-Durability Store}"
+      printf 'APP_ENV=%s\n' "${APP_ENV:-production}"
+      printf 'APP_DEBUG=%s\n' "${APP_DEBUG:-false}"
+      printf 'APP_URL=%s\n' "${APP_URL:-http://localhost}"
+      printf 'FRONTEND_URL=%s\n' "${FRONTEND_URL:-*}"
+      printf 'JWT_SECRET=%s\n' "${JWT_SECRET:-}"
+      printf 'JWT_TTL=%s\n' "${JWT_TTL:-480}"
+      printf 'SESSION_DRIVER=%s\n' "${SESSION_DRIVER:-file}"
+      printf 'CACHE_STORE=%s\n' "${CACHE_STORE:-file}"
+      printf 'QUEUE_CONNECTION=%s\n' "${QUEUE_CONNECTION:-sync}"
+      if [ -n "${APP_KEY:-}" ]; then
+        printf 'APP_KEY=%s\n' "${APP_KEY}"
+      fi
+    } > .env
+  fi
+
+  sync_db_env_file
+}
+
+sync_db_env_file() {
+  if [ -z "${DB_HOST:-}" ]; then
     return 0
   fi
 
-  echo "==> Creating .env from Railway environment variables"
+  echo "==> Syncing MySQL settings into .env"
+  if [ -f .env ]; then
+    grep -v '^DB_' .env > .env.tmp || true
+    mv .env.tmp .env
+  fi
   {
-    printf 'APP_NAME="%s"\n' "${APP_NAME:-Durability Store}"
-    printf 'APP_ENV=%s\n' "${APP_ENV:-production}"
-    printf 'APP_DEBUG=%s\n' "${APP_DEBUG:-false}"
-    printf 'APP_URL=%s\n' "${APP_URL:-http://localhost}"
-    printf 'FRONTEND_URL=%s\n' "${FRONTEND_URL:-*}"
-    printf 'JWT_SECRET=%s\n' "${JWT_SECRET:-}"
-    printf 'JWT_TTL=%s\n' "${JWT_TTL:-480}"
-    printf 'SESSION_DRIVER=%s\n' "${SESSION_DRIVER:-file}"
-    printf 'CACHE_STORE=%s\n' "${CACHE_STORE:-file}"
-    printf 'QUEUE_CONNECTION=%s\n' "${QUEUE_CONNECTION:-sync}"
-    if [ -n "${APP_KEY:-}" ]; then
-      printf 'APP_KEY=%s\n' "${APP_KEY}"
-    fi
-  } > .env
+    printf 'DB_CONNECTION=mysql\n'
+    printf 'DB_HOST=%s\n' "${DB_HOST}"
+    printf 'DB_PORT=%s\n' "${DB_PORT:-3306}"
+    printf 'DB_DATABASE=%s\n' "${DB_DATABASE:-railway}"
+    printf 'DB_USERNAME=%s\n' "${DB_USERNAME:-root}"
+    printf 'DB_PASSWORD=%s\n' "${DB_PASSWORD:-}"
+  } >> .env
 }
 
 ensure_app_key() {
