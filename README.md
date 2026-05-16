@@ -129,6 +129,6 @@ cd backend && DB_CONNECTION=sqlite DB_DATABASE=:memory: php artisan migrate:fres
 
 - Frontend (Vercel): `VITE_API_URL=https://clothing-store-production-9717.up.railway.app/api`  
   Удалите в Vercel старую переменную `your-backend-api-url.com`, если она есть.
-- Backend (Railway): привяжите MySQL; в Variables задайте `APP_KEY`, `JWT_SECRET`, `FRONTEND_URL` (домен Vercel).
+- Backend (Railway): привяжите MySQL; задайте `APP_KEY`, `JWT_SECRET`, `FRONTEND_URL`. Все `*.vercel.app` (preview и production) разрешены автоматически.
   - `APP_KEY`: локально `cd backend && php artisan key:generate --show` и вставьте значение в Railway.
 - Логин после seed: `admin@store.local` / `ChangeMe123!`
