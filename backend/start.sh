@@ -22,6 +22,16 @@ map_railway_mysql_env() {
     return 0
   fi
 
+  if [ -n "${DB_HOST:-}" ] && [ "${DB_HOST}" != "127.0.0.1" ]; then
+    export DB_CONNECTION=mysql
+    export DB_PORT="${DB_PORT:-3306}"
+    export DB_DATABASE="${DB_DATABASE:-railway}"
+    export DB_USERNAME="${DB_USERNAME:-root}"
+    export DB_PASSWORD="${DB_PASSWORD:-}"
+    echo "==> Using manual DB_* variables: ${DB_HOST}:${DB_PORT}/${DB_DATABASE}"
+    return 0
+  fi
+
   local db_url="${DATABASE_URL:-${MYSQL_URL:-${MYSQL_PUBLIC_URL:-${MYSQL_PRIVATE_URL:-}}}}"
   if [ -z "$db_url" ]; then
     return 1
@@ -60,13 +70,12 @@ require_mysql_connection() {
 ERROR: MySQL is not connected to the clothing-store service.
 
 Fix in Railway:
-  1. Project → "+ New" → "Database" → "MySQL" (if you do not have one yet)
-  2. Open service "clothing-store" → tab "Variables"
-  3. Click "+ New Variable" → "Add Reference" (or "Connect")
-  4. Select your MySQL service → add all MYSQL* variables
-  5. Redeploy clothing-store
-
-You should see MYSQLHOST, MYSQLPORT, MYSQLUSER, MYSQLPASSWORD, MYSQLDATABASE in Variables.
+  1. On project canvas click "+ Create" / "+ New" → Database → MySQL
+  2. Open the new MySQL service → tab "Connect" → copy host, port, user, password, database
+  3. Open "clothing-store" → Variables → add:
+     MYSQLHOST, MYSQLPORT, MYSQLUSER, MYSQLPASSWORD, MYSQLDATABASE
+     (or DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD, DB_DATABASE)
+  4. Redeploy clothing-store
 
 EOF
   exit 1
