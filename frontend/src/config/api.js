@@ -1,24 +1,38 @@
-/** Production Railway API (used when Vercel env still has a placeholder). */
+/** Production Railway API — always used for production builds. */
 export const PRODUCTION_API_URL =
   'https://clothing-store-production-9717.up.railway.app/api'
 
-const PLACEHOLDER_PATTERNS = [
-  'your-backend-api-url',
-  'REPLACE_WITH',
-  'example.com/api',
-]
+const LOCAL_API_URL = 'http://localhost:8000/api'
 
-function isPlaceholder(url) {
+/** Invalid API URLs from Vercel/dashboard placeholders — never use these. */
+function isInvalidApiUrl(url) {
   if (!url || typeof url !== 'string') return true
-  const lower = url.toLowerCase()
-  return PLACEHOLDER_PATTERNS.some((p) => lower.includes(p))
+  const lower = url.toLowerCase().trim()
+  if (!lower.startsWith('http')) return true
+  if (!lower.includes('clothing-store-production-9717.up.railway.app')) {
+    if (
+      /replace|placeholder|your-backend|example\.com|localhost|127\.0\.0\.1/i.test(
+        lower,
+      )
+    ) {
+      return true
+    }
+    if (!/^https:\/\/[a-z0-9.-]+\.up\.railway\.app\/api\/?$/i.test(lower)) {
+      return true
+    }
+  }
+  return false
 }
 
 export function resolveApiUrl() {
+  if (import.meta.env.PROD) {
+    return PRODUCTION_API_URL
+  }
   const fromEnv = import.meta.env.VITE_API_URL
-  if (!isPlaceholder(fromEnv)) return fromEnv.replace(/\/$/, '')
-  if (import.meta.env.PROD) return PRODUCTION_API_URL
-  return 'http://localhost:8000/api'
+  if (!isInvalidApiUrl(fromEnv)) {
+    return fromEnv.replace(/\/$/, '')
+  }
+  return LOCAL_API_URL
 }
 
 export function resolveApiOrigin() {
