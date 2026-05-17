@@ -47,7 +47,7 @@ class Sale extends Model
             : (int) $this->items()->sum('quantity');
         $amount = number_format((float) $this->subtotal, 0, '.', ' ');
 
-        if ($this->number && $this->number !== 'draft' && ! str_starts_with($this->number, 'S-')) {
+        if ($this->number && ! str_starts_with($this->number, 'draft') && ! str_starts_with($this->number, 'S-')) {
             return $this->number;
         }
 

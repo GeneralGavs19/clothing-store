@@ -9,6 +9,7 @@ use App\Models\StockMovement;
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class SalesService
@@ -24,7 +25,7 @@ class SalesService
             $soldAt = now();
 
             $sale = Sale::create([
-                'number' => 'draft',
+                'number' => 'draft-'.Str::uuid()->toString(),
                 'cashier_id' => $cashier->id,
                 'status' => 'approved',
                 'approved_by' => $cashier->id,
@@ -71,7 +72,7 @@ class SalesService
                     'user_id' => $cashier->id,
                     'type' => 'sale',
                     'from_location' => $source,
-                    'to_location' => 'sold',
+                    'to_location' => 'external',
                     'quantity' => -1 * $quantity,
                     'stock_after' => $product->stock_quantity,
                     'display_after' => $product->display_quantity,
@@ -146,7 +147,7 @@ class SalesService
                     'user_id' => $admin->id,
                     'type' => 'sale',
                     'from_location' => $source,
-                    'to_location' => 'sold',
+                    'to_location' => 'external',
                     'quantity' => -1 * (int) $item->quantity,
                     'stock_after' => $product->stock_quantity,
                     'display_after' => $product->display_quantity,
