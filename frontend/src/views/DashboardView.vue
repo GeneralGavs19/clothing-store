@@ -9,7 +9,7 @@
         <StatCard title="Продажи" :value="summary.approved_sales || 0" tone="sky">
           <ReceiptText class="h-5 w-5" />
         </StatCard>
-        <StatCard title="Ожидают" :value="summary.pending_sales || 0" tone="amber">
+        <StatCard title="Сегодня" :value="summary.today_sales || 0" tone="amber">
           <Clock3 class="h-5 w-5" />
         </StatCard>
         <StatCard title="Низкий остаток" :value="summary.low_stock || 0" tone="rose">
@@ -21,18 +21,21 @@
     <div class="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
       <section class="panel p-4">
         <div class="mb-4 flex items-center justify-between gap-3">
-          <h2 class="font-semibold">Продажи за 14 дней</h2>
+          <h2 class="font-semibold">Продажи по дням (14 дней)</h2>
           <button class="btn-muted h-9 px-3" @click="refresh"><RefreshCw class="h-4 w-4" />Обновить</button>
         </div>
         <div v-if="!salesByDay.length" class="h-64">
-          <EmptyState title="Продаж пока нет" text="После подтверждения продаж график заполнится автоматически." />
+          <EmptyState title="Продаж пока нет" text="После оформления продаж график заполнится автоматически." />
         </div>
         <div v-else class="flex h-64 items-end gap-2 overflow-hidden rounded-md bg-slate-50 p-4 dark:bg-slate-900">
           <div v-for="day in salesByDay" :key="day.day" class="flex min-w-0 flex-1 flex-col items-center gap-2">
             <div class="flex w-full flex-1 items-end">
               <div class="w-full rounded-t-md bg-emerald-500" :style="{ height: barHeight(day.revenue) }" />
             </div>
-            <span class="text-[11px] text-slate-500 dark:text-slate-400">{{ day.label }}</span>
+            <span class="text-center text-[11px] leading-tight text-slate-500 dark:text-slate-400">
+              <span class="block">{{ day.label }}</span>
+              <span class="block text-[10px]">{{ day.sales }} прод. · {{ day.items_sold }} шт.</span>
+            </span>
           </div>
         </div>
       </section>
@@ -58,21 +61,26 @@
 
     <div class="grid gap-5 xl:grid-cols-3">
       <section class="panel p-4">
-        <h2 class="mb-4 font-semibold">Самые продаваемые</h2>
+        <h2 class="mb-1 font-semibold">Самые продаваемые</h2>
+        <p class="mb-4 text-xs text-slate-500">За последние 14 дней</p>
         <EmptyState v-if="!topProducts.length" title="Нет данных" />
         <div v-else class="space-y-3">
-          <div v-for="item in topProducts" :key="item.id" class="flex items-center justify-between gap-3">
-            <div class="min-w-0">
-              <div class="truncate text-sm font-medium">{{ item.name }}</div>
-              <div class="text-xs text-slate-500">{{ item.sku }}</div>
+          <div v-for="(item, index) in topProducts" :key="item.id" class="flex items-center gap-3">
+            <span class="w-5 shrink-0 text-xs font-semibold text-slate-400">{{ index + 1 }}</span>
+            <div class="h-10 w-10 shrink-0 overflow-hidden rounded-md bg-slate-100 dark:bg-slate-800">
+              <img v-if="item.photo_url" :src="photoUrl(item.photo_url)" class="h-full w-full object-cover" :alt="item.name" loading="lazy" />
             </div>
-            <div class="text-right text-sm font-semibold">{{ item.quantity }} шт.</div>
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-sm font-medium">{{ item.name }}</div>
+              <div class="text-xs text-slate-500">{{ item.quantity }} шт. · {{ money(item.revenue) }}</div>
+            </div>
           </div>
         </div>
       </section>
 
       <section class="panel p-4">
-        <h2 class="mb-4 font-semibold">Доход по категориям</h2>
+        <h2 class="mb-1 font-semibold">Доход по категориям</h2>
+        <p class="mb-4 text-xs text-slate-500">За последние 14 дней</p>
         <EmptyState v-if="!categoryRevenue.length" title="Нет данных" />
         <div v-else class="space-y-3">
           <div v-for="item in categoryRevenue" :key="item.name">
@@ -107,6 +115,7 @@
 <script setup>
 import { computed, h, onMounted, onUnmounted } from 'vue'
 import { apiError } from '../api/client'
+import { resolveApiOrigin } from '../config/api'
 import { useDashboardStore } from '../stores/dashboard'
 import { useToastStore } from '../stores/toasts'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -137,6 +146,8 @@ const dashboard = useDashboardStore()
 const toast = useToastStore()
 let timer
 
+const apiBase = computed(() => resolveApiOrigin())
+
 const summary = computed(() => dashboard.data?.summary || {})
 const salesByDay = computed(() => dashboard.data?.sales_by_day || [])
 const topProducts = computed(() => dashboard.data?.top_products || [])
@@ -144,6 +155,11 @@ const categoryRevenue = computed(() => dashboard.data?.category_revenue || [])
 const cashiers = computed(() => dashboard.data?.cashier_activity || [])
 const maxRevenue = computed(() => Math.max(...salesByDay.value.map((item) => Number(item.revenue)), 1))
 const maxCategoryRevenue = computed(() => Math.max(...categoryRevenue.value.map((item) => Number(item.revenue)), 1))
+
+function photoUrl(path) {
+  if (!path) return ''
+  return path.startsWith('http') ? path : `${apiBase.value}${path}`
+}
 
 function money(value) {
   return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT', maximumFractionDigits: 0 }).format(Number(value || 0))

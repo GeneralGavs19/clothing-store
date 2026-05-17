@@ -44,13 +44,13 @@ class SaleController extends Controller
             'cashier_note' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $sale = $sales->createPending(
+        $sale = $sales->createCompleted(
             $request->user(),
             $data['items'],
             isset($data['cashier_note']) ? strip_tags($data['cashier_note']) : null
         );
 
-        $logger->log('sales.pending_created', $sale, ['number' => $sale->number], $request);
+        $logger->log('sales.created', $sale, ['number' => $sale->number], $request);
 
         return response()->json($sale, 201);
     }

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="space-y-5">
     <section class="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
       <div class="panel p-4">
@@ -41,55 +41,19 @@
               <div class="text-xl font-semibold">{{ money(cartTotal) }}</div>
             </div>
             <button class="btn-primary" :disabled="saving">
-              <LoaderCircle v-if="saving" class="h-4 w-4 animate-spin" />Создать
+              <LoaderCircle v-if="saving" class="h-4 w-4 animate-spin" />Оформить продажу
             </button>
           </div>
         </form>
       </div>
     </section>
 
-    <section v-if="auth.isAdmin" class="panel overflow-hidden">
-      <div class="flex items-center justify-between border-b border-slate-200 p-4 dark:border-slate-800">
-        <h2 class="font-semibold">Ожидают подтверждения</h2>
-        <span class="badge bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">{{ sales.pendingMeta.total }}</span>
-      </div>
-      <EmptyState v-if="!sales.loadingPending && !sales.pending.length" class="m-4" title="Очередь пустая" />
-      <div v-else class="divide-y divide-slate-200 dark:divide-slate-800">
-        <div v-for="sale in sales.pending" :key="sale.id" class="card p-4">
-          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <div class="flex flex-wrap items-center gap-2">
-                <h3 class="font-medium">{{ sale.number }}</h3>
-                <span class="badge bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">pending</span>
-              </div>
-              <p class="mt-1 text-sm text-slate-500">{{ sale.cashier?.name }} · {{ date(sale.submitted_at) }}</p>
-              <div class="mt-3 flex flex-wrap gap-2 text-xs text-slate-600 dark:text-slate-300">
-                <span v-for="item in sale.items" :key="item.id" class="rounded-md bg-slate-100 px-2 py-1 dark:bg-slate-900">
-                  {{ item.product?.name }} × {{ item.quantity }}
-                </span>
-              </div>
-            </div>
-            <div class="flex items-center gap-2 lg:flex-col lg:items-end">
-              <div class="text-lg font-semibold">{{ money(sale.subtotal) }}</div>
-              <div class="flex gap-2">
-                <button class="btn-primary h-9 px-3" @click="approve(sale)"><Check class="h-4 w-4" /></button>
-                <button class="btn-danger h-9 px-3" @click="reject(sale)"><X class="h-4 w-4" /></button>
-                <button v-if="auth.isAdmin" class="btn-muted h-9 px-3" @click="confirmDeleteSale(sale)"><X class="h-4 w-4" /></button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <PaginationBar :meta="sales.pendingMeta" @page="fetchPending" />
-    </section>
-
-    <section class="panel overflow-hidden">
+<section class="panel overflow-hidden">
       <div class="flex flex-col gap-3 border-b border-slate-200 p-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
         <h2 class="font-semibold">История продаж</h2>
         <select v-model="historyStatus" class="select sm:max-w-48" @change="fetchHistory(1)">
           <option value="">Все статусы</option>
-          <option value="pending">Ожидают</option>
-          <option value="approved">Подтверждены</option>
+          <option value="approved">Оформлены</option>
           <option value="rejected">Отклонены</option>
         </select>
       </div>
@@ -168,7 +132,7 @@ async function createSale() {
       items: cart.value.map((item) => ({ product_id: item.product.id, quantity: item.quantity })),
       cashier_note: cashierNote.value,
     })
-    toast.push('Продажа отправлена на подтверждение')
+    toast.push('Продажа оформлена')
     cart.value = []
     cashierNote.value = ''
     await refreshAll()
@@ -218,7 +182,7 @@ async function fetchHistory(page = 1) {
 
 async function refreshAll() {
   try {
-    await Promise.all([fetchProducts(), fetchHistory(sales.meta.current_page), fetchPending(sales.pendingMeta.current_page)])
+    await Promise.all([fetchProducts(), fetchHistory(sales.meta.current_page)])
   } catch (error) {
     toast.push(apiError(error), 'error')
   }

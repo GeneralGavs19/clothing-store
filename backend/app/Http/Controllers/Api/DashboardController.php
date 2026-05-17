@@ -4,19 +4,19 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
-use App\Models\DailyStat;
 use App\Models\Product;
 use App\Models\Sale;
 use App\Models\User;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 class DashboardController extends Controller
 {
+    private const CHART_DAYS = 14;
+
     public function __invoke()
     {
+        $chartStart = now()->subDays(self::CHART_DAYS - 1)->startOfDay();
         $approved = Sale::query()->where('status', 'approved');
 
         $summary = [
@@ -26,6 +26,8 @@ class DashboardController extends Controller
             'pending_sales' => (int) Sale::query()->where('status', 'pending')->count(),
             'today_sales' => (int) (clone $approved)->whereDate('approved_at', today())->count(),
             'today_revenue' => (float) (clone $approved)->whereDate('approved_at', today())->sum('subtotal'),
+            'today_profit' => (float) (clone $approved)->whereDate('approved_at', today())->sum('profit'),
+            'today_items_sold' => $this->todayItemsSold(),
             'week_revenue' => (float) (clone $approved)->whereBetween('approved_at', [now()->startOfWeek(), now()->endOfWeek()])->sum('subtotal'),
             'month_revenue' => (float) (clone $approved)->whereMonth('approved_at', now()->month)->whereYear('approved_at', now()->year)->sum('subtotal'),
             'products' => (int) Product::query()->where('status', '!=', 'archived')->count(),
@@ -36,43 +38,52 @@ class DashboardController extends Controller
 
         $salesByDay = Sale::query()
             ->where('status', 'approved')
-            ->where('approved_at', '>=', now()->subDays(13)->startOfDay())
+            ->where('approved_at', '>=', $chartStart)
             ->selectRaw('DATE(approved_at) as day, COUNT(*) as sales, SUM(subtotal) as revenue, SUM(profit) as profit')
             ->groupBy('day')
             ->orderBy('day')
             ->get();
 
-        // materialized daily stats (cached)
-        $dailyStats = collect();
-        if (Schema::hasTable('daily_stats')) {
-            $dailyStats = Cache::remember('daily_stats_last_14', 3600, function () {
-                return DailyStat::query()
-                    ->whereBetween('date', [now()->subDays(13)->toDateString(), now()->toDateString()])
-                    ->orderBy('date')
-                    ->get();
-            });
-        }
+        $itemsByDay = DB::table('sale_items')
+            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+            ->where('sales.status', 'approved')
+            ->where('sales.approved_at', '>=', $chartStart)
+            ->groupBy(DB::raw('DATE(sales.approved_at)'))
+            ->orderBy(DB::raw('DATE(sales.approved_at)'))
+            ->selectRaw('DATE(sales.approved_at) as day, SUM(sale_items.quantity) as items_sold')
+            ->pluck('items_sold', 'day');
 
         $topProducts = DB::table('sale_items')
             ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
             ->join('products', 'products.id', '=', 'sale_items.product_id')
             ->where('sales.status', 'approved')
-            ->groupBy('products.id', 'products.name', 'products.sku')
+            ->where('sales.approved_at', '>=', $chartStart)
+            ->groupBy('products.id', 'products.name', 'products.sku', 'products.photo_path')
             ->orderByDesc(DB::raw('SUM(sale_items.quantity)'))
-            ->limit(8)
+            ->limit(10)
             ->get([
                 'products.id',
                 'products.name',
                 'products.sku',
+                'products.photo_path',
                 DB::raw('SUM(sale_items.quantity) as quantity'),
                 DB::raw('SUM(sale_items.line_total) as revenue'),
-            ]);
+                DB::raw('SUM(sale_items.line_profit) as profit'),
+            ])
+            ->map(function ($row) {
+                $row->photo_url = $row->photo_path
+                    ? \Illuminate\Support\Facades\Storage::url($row->photo_path)
+                    : null;
+
+                return $row;
+            });
 
         $categoryRevenue = DB::table('sale_items')
             ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
             ->join('products', 'products.id', '=', 'sale_items.product_id')
             ->leftJoin('categories', 'categories.id', '=', 'products.category_id')
             ->where('sales.status', 'approved')
+            ->where('sales.approved_at', '>=', $chartStart)
             ->groupBy('categories.id', 'categories.name')
             ->orderByDesc(DB::raw('SUM(sale_items.line_total)'))
             ->limit(8)
@@ -80,6 +91,7 @@ class DashboardController extends Controller
                 DB::raw('COALESCE(categories.name, "Без категории") as name'),
                 DB::raw('SUM(sale_items.line_total) as revenue'),
                 DB::raw('SUM(sale_items.line_profit) as profit'),
+                DB::raw('SUM(sale_items.quantity) as quantity'),
             ]);
 
         $cashierActivity = User::query()
@@ -94,15 +106,8 @@ class DashboardController extends Controller
 
         return response()->json([
             'summary' => $summary,
-            'sales_by_day' => $this->fillDays($salesByDay),
-            'daily_stats' => $dailyStats->map(fn($r) => [
-                'date' => $r->date->toDateString(),
-                'label' => $r->date->format('d.m'),
-                'total_sales' => (int) $r->total_sales,
-                'revenue' => (float) $r->revenue,
-                'profit' => (float) $r->profit,
-                'items_sold' => (int) $r->items_sold,
-            ])->values(),
+            'chart_days' => self::CHART_DAYS,
+            'sales_by_day' => $this->fillDays($salesByDay, $itemsByDay),
             'top_products' => $topProducts,
             'category_revenue' => $categoryRevenue,
             'low_stock_products' => Product::query()
@@ -117,12 +122,21 @@ class DashboardController extends Controller
         ]);
     }
 
-    private function fillDays($rows): array
+    private function todayItemsSold(): int
+    {
+        return (int) DB::table('sale_items')
+            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+            ->where('sales.status', 'approved')
+            ->whereDate('sales.approved_at', today())
+            ->sum('sale_items.quantity');
+    }
+
+    private function fillDays($rows, $itemsByDay): array
     {
         $indexed = $rows->keyBy('day');
         $days = [];
 
-        for ($date = now()->subDays(13)->startOfDay(); $date <= now()->startOfDay(); $date->addDay()) {
+        for ($date = now()->subDays(self::CHART_DAYS - 1)->startOfDay(); $date <= now()->startOfDay(); $date->addDay()) {
             $key = $date->toDateString();
             $row = $indexed->get($key);
             $days[] = [
@@ -131,6 +145,7 @@ class DashboardController extends Controller
                 'sales' => (int) ($row->sales ?? 0),
                 'revenue' => (float) ($row->revenue ?? 0),
                 'profit' => (float) ($row->profit ?? 0),
+                'items_sold' => (int) ($itemsByDay[$key] ?? 0),
             ];
         }
 

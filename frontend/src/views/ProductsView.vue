@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="space-y-5">
     <section class="panel p-4">
       <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -37,8 +37,14 @@
       <div v-else class="p-2">
         <div class="divide-y divide-slate-200 dark:divide-slate-800">
           <div v-for="product in catalog.products" :key="product.id" class="flex items-center justify-between p-3 hover:bg-slate-50 dark:hover:bg-slate-900">
-            <div class="min-w-0">
-              <button class="text-left w-full" @click="detail = product">
+            <div class="flex min-w-0 flex-1 items-center gap-3">
+              <button type="button" class="h-12 w-12 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800" @click="detail = product">
+                <img v-if="product.photo_url" :src="photoUrl(product.photo_url)" class="h-full w-full object-cover" :alt="product.name" loading="lazy" />
+                <div v-else class="flex h-full w-full items-center justify-center">
+                  <Package class="h-5 w-5 text-slate-400" />
+                </div>
+              </button>
+              <button type="button" class="min-w-0 text-left" @click="detail = product">
                 <div class="truncate font-medium">{{ product.name }}</div>
                 <div class="text-xs text-slate-500">{{ product.sku }} · {{ product.category?.name || 'Без категории' }}</div>
               </button>

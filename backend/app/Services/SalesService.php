@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\PendingSale;
 use App\Models\Product;
 use App\Models\Sale;
 use App\Models\StockMovement;
@@ -14,7 +13,10 @@ use Illuminate\Validation\ValidationException;
 
 class SalesService
 {
-    public function createPending(User $cashier, array $items, ?string $note = null): Sale
+    /**
+     * Create a sale and apply stock / statistics immediately (no admin approval).
+     */
+    public function createCompleted(User $cashier, array $items, ?string $note = null): Sale
     {
         return DB::transaction(function () use ($cashier, $items, $note) {
             $productIds = collect($items)->pluck('product_id')->unique()->values();
@@ -22,12 +24,16 @@ class SalesService
 
             $this->assertDisplayAvailability($items, $products);
 
+            $completedAt = now();
+
             $sale = Sale::create([
                 'number' => 'S-'.now()->format('YmdHis').'-'.random_int(100, 999),
                 'cashier_id' => $cashier->id,
-                'status' => 'pending',
+                'status' => 'approved',
+                'approved_by' => $cashier->id,
+                'approved_at' => $completedAt,
+                'submitted_at' => $completedAt,
                 'cashier_note' => $note,
-                'submitted_at' => now(),
             ]);
 
             $subtotal = 0;
@@ -48,22 +54,39 @@ class SalesService
                     'line_profit' => $lineProfit,
                 ]);
 
+                $product->display_quantity -= $quantity;
+                $product->refreshStatus();
+                $product->save();
+
+                StockMovement::create([
+                    'product_id' => $product->id,
+                    'sale_id' => $sale->id,
+                    'user_id' => $cashier->id,
+                    'type' => 'sale',
+                    'from_location' => 'display',
+                    'to_location' => 'external',
+                    'quantity' => -1 * $quantity,
+                    'stock_after' => $product->stock_quantity,
+                    'display_after' => $product->display_quantity,
+                    'note' => 'Sale '.$sale->number,
+                ]);
+
                 $subtotal += $lineTotal;
                 $profit += $lineProfit;
             }
 
             $sale->update(['subtotal' => $subtotal, 'profit' => $profit]);
 
-            PendingSale::create([
-                'sale_id' => $sale->id,
-                'cashier_id' => $cashier->id,
-                'status' => 'pending',
-                'submitted_at' => now(),
-                'note' => $note,
-            ]);
+            $this->recordDailyStats($sale, $completedAt);
 
-            return $sale->load(['items.product.category', 'cashier']);
+            return $sale->load(['items.product.category', 'cashier', 'approver']);
         });
+    }
+
+    /** @deprecated Use createCompleted — kept for legacy pending rows in DB */
+    public function createPending(User $cashier, array $items, ?string $note = null): Sale
+    {
+        return $this->createCompleted($cashier, $items, $note);
     }
 
     public function approve(Sale $sale, User $admin, ?string $note = null): Sale
@@ -125,95 +148,7 @@ class SalesService
                 'reviewed_at' => $approvedAt,
             ]);
 
-            // Update materialized daily stats incrementally (guard if table not present)
-            try {
-                $date = $approvedAt->toDateString();
-                $itemsSold = $sale->items->sum('quantity');
-
-                // If a row exists, increment; otherwise create initial totals
-                $updated = DailyStat::where('date', $date)->exists();
-
-                if ($updated) {
-                    DailyStat::where('date', $date)->increment('total_sales', 1);
-                    DailyStat::where('date', $date)->increment('revenue', $sale->subtotal);
-                    DailyStat::where('date', $date)->increment('profit', $sale->profit);
-                    DailyStat::where('date', $date)->increment('items_sold', $itemsSold);
-                } else {
-                    DailyStat::create([
-                        'date' => $date,
-                        'total_sales' => 1,
-                        'revenue' => $sale->subtotal,
-                        'profit' => $sale->profit,
-                        'items_sold' => $itemsSold,
-                    ]);
-                }
-
-                // Update cached dashboard daily stats in-place (if cached) to avoid a cache miss storm
-                if (Cache::has('daily_stats_last_14')) {
-                    $cached = Cache::get('daily_stats_last_14');
-                    $collection = $cached instanceof \Illuminate\Support\Collection ? $cached : collect($cached);
-                    $found = false;
-
-                    $collection = $collection->map(function ($row) use ($date, $sale, $itemsSold, &$found) {
-                        $rowDate = null;
-                        if (is_array($row)) $rowDate = $row['date'] ?? null;
-                        elseif ($row instanceof \Illuminate\Support\Collection) $rowDate = $row->get('date');
-                        elseif (is_object($row)) $rowDate = $row->date ?? null;
-
-                        if ($rowDate instanceof \Illuminate\Support\Carbon) {
-                            $rowDate = $rowDate->toDateString();
-                        }
-
-                        if ($rowDate == $date) {
-                            $found = true;
-                            $total_sales = ((int) ($row['total_sales'] ?? $row->total_sales ?? 0)) + 1;
-                            $revenue = ((float) ($row['revenue'] ?? $row->revenue ?? 0)) + (float) $sale->subtotal;
-                            $profit = ((float) ($row['profit'] ?? $row->profit ?? 0)) + (float) $sale->profit;
-                            $items_sold = ((int) ($row['items_sold'] ?? $row->items_sold ?? 0)) + $itemsSold;
-
-                            return [
-                                'date' => $date,
-                                'label' => \Illuminate\Support\Carbon::parse($date)->format('d.m'),
-                                'total_sales' => $total_sales,
-                                'revenue' => $revenue,
-                                'profit' => $profit,
-                                'items_sold' => $items_sold,
-                            ];
-                        }
-
-                        // normalize existing row
-                        return [
-                            'date' => $row->date ?? ($row['date'] ?? null),
-                            'label' => isset($row->date) ? \Illuminate\Support\Carbon::parse($row->date)->format('d.m') : ($row['label'] ?? null),
-                            'total_sales' => (int) ($row['total_sales'] ?? $row->total_sales ?? 0),
-                            'revenue' => (float) ($row['revenue'] ?? $row->revenue ?? 0),
-                            'profit' => (float) ($row['profit'] ?? $row->profit ?? 0),
-                            'items_sold' => (int) ($row['items_sold'] ?? $row->items_sold ?? 0),
-                        ];
-                    });
-
-                    if (! $found) {
-                        $collection->push([
-                            'date' => $date,
-                            'label' => \Illuminate\Support\Carbon::parse($date)->format('d.m'),
-                            'total_sales' => 1,
-                            'revenue' => (float) $sale->subtotal,
-                            'profit' => (float) $sale->profit,
-                            'items_sold' => $itemsSold,
-                        ]);
-                    }
-
-                    // keep only the last 14 days within window
-                    $start = now()->subDays(13)->toDateString();
-                    $end = now()->toDateString();
-                    $collection = $collection->sortBy('date')->values()->filter(fn ($r) => $r['date'] >= $start && $r['date'] <= $end)->values();
-
-                    Cache::put('daily_stats_last_14', $collection, 3600);
-                }
-            } catch (\Throwable $e) {
-                // If the daily_stats table does not exist (migrations not run) or any DB error,
-                // don't fail the approval — just continue. Optionally log the error.
-            }
+            $this->recordDailyStats($sale, $approvedAt);
 
             return $sale->load(['items.product.category', 'cashier', 'approver']);
         });
@@ -245,16 +180,36 @@ class SalesService
         });
     }
 
+    private function recordDailyStats(Sale $sale, $completedAt): void
+    {
+        try {
+            $date = $completedAt->toDateString();
+            $itemsSold = (int) $sale->items->sum('quantity');
+
+            if (DailyStat::where('date', $date)->exists()) {
+                DailyStat::where('date', $date)->increment('total_sales', 1);
+                DailyStat::where('date', $date)->increment('revenue', $sale->subtotal);
+                DailyStat::where('date', $date)->increment('profit', $sale->profit);
+                DailyStat::where('date', $date)->increment('items_sold', $itemsSold);
+            } else {
+                DailyStat::create([
+                    'date' => $date,
+                    'total_sales' => 1,
+                    'revenue' => $sale->subtotal,
+                    'profit' => $sale->profit,
+                    'items_sold' => $itemsSold,
+                ]);
+            }
+
+            Cache::forget('daily_stats_last_14');
+        } catch (\Throwable) {
+            // daily_stats table may be missing on first deploy
+        }
+    }
+
     private function assertDisplayAvailability(array $items, $products): void
     {
         $requested = collect($items)->groupBy('product_id')->map(fn ($rows) => $rows->sum('quantity'));
-        $pendingByProduct = DB::table('sale_items')
-            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
-            ->where('sales.status', 'pending')
-            ->whereIn('sale_items.product_id', $requested->keys())
-            ->groupBy('sale_items.product_id')
-            ->selectRaw('sale_items.product_id, SUM(sale_items.quantity) as quantity')
-            ->pluck('quantity', 'product_id');
 
         foreach ($requested as $productId => $quantity) {
             $product = $products->get((int) $productId);
@@ -263,10 +218,9 @@ class SalesService
                 throw ValidationException::withMessages(['items' => 'Product is unavailable.']);
             }
 
-            $available = $product->display_quantity - (int) ($pendingByProduct[$productId] ?? 0);
-            if ($quantity > $available) {
+            if ($quantity > $product->display_quantity) {
                 throw ValidationException::withMessages([
-                    'items' => "Only {$available} display units are available for {$product->name}.",
+                    'items' => "Only {$product->display_quantity} display units are available for {$product->name}.",
                 ]);
             }
         }
