@@ -48,7 +48,7 @@
       </div>
     </section>
 
-<section class="panel overflow-hidden">
+    <section class="panel overflow-hidden">
       <div class="flex flex-col gap-3 border-b border-slate-200 p-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
         <h2 class="font-semibold">История продаж</h2>
         <select v-model="historyStatus" class="select sm:max-w-48" @change="fetchHistory(1)">
@@ -86,7 +86,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { Check, LoaderCircle, RefreshCw, ShoppingCart, X } from 'lucide-vue-next'
+import { LoaderCircle, RefreshCw, ShoppingCart, X } from 'lucide-vue-next'
 import { apiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useCatalogStore } from '../stores/catalog'
@@ -143,26 +143,6 @@ async function createSale() {
   }
 }
 
-async function approve(sale) {
-  try {
-    await sales.approve(sale.id, prompt('Комментарий администратора') || '')
-    toast.push('Продажа подтверждена')
-    await refreshAll()
-  } catch (error) {
-    toast.push(apiError(error), 'error')
-  }
-}
-
-async function reject(sale) {
-  try {
-    await sales.reject(sale.id, prompt('Причина отклонения') || '')
-    toast.push('Продажа отклонена', 'warning')
-    await refreshAll()
-  } catch (error) {
-    toast.push(apiError(error), 'error')
-  }
-}
-
 async function fetchProducts() {
   await catalog.fetchProducts({ search: productSearch.value || undefined, per_page: 12 })
 }
@@ -170,10 +150,6 @@ async function fetchProducts() {
 function debouncedProducts() {
   window.clearTimeout(debounce)
   debounce = window.setTimeout(fetchProducts, 300)
-}
-
-async function fetchPending(page = 1) {
-  if (auth.isAdmin) await sales.fetchPending({ page })
 }
 
 async function fetchHistory(page = 1) {
