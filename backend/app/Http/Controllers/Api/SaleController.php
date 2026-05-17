@@ -26,11 +26,13 @@ class SaleController extends Controller
             $query->where('cashier_id', $request->integer('cashier_id'));
         }
         if ($request->filled('date_from')) {
-            $query->whereDate('created_at', '>=', $request->date('date_from'));
+            $query->whereDate('approved_at', '>=', $request->date('date_from'));
         }
         if ($request->filled('date_to')) {
-            $query->whereDate('created_at', '<=', $request->date('date_to'));
+            $query->whereDate('approved_at', '<=', $request->date('date_to'));
         }
+
+        $query->orderByDesc('approved_at')->orderByDesc('id');
 
         return response()->json(ApiPagination::format($query->paginate($request->integer('per_page', 15))));
     }
@@ -41,6 +43,7 @@ class SaleController extends Controller
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['required', 'exists:products,id'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.source' => ['nullable', 'in:display,stock'],
             'cashier_note' => ['nullable', 'string', 'max:1000'],
         ]);
 

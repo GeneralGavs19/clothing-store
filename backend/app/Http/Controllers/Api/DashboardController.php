@@ -51,7 +51,8 @@ class DashboardController extends Controller
             ->groupBy(DB::raw('DATE(sales.approved_at)'))
             ->orderBy(DB::raw('DATE(sales.approved_at)'))
             ->selectRaw('DATE(sales.approved_at) as day, SUM(sale_items.quantity) as items_sold')
-            ->pluck('items_sold', 'day');
+            ->get()
+            ->mapWithKeys(fn ($row) => [Carbon::parse($row->day)->toDateString() => (int) $row->items_sold]);
 
         $topProducts = DB::table('sale_items')
             ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
@@ -133,19 +134,25 @@ class DashboardController extends Controller
 
     private function fillDays($rows, $itemsByDay): array
     {
-        $indexed = $rows->keyBy('day');
+        $indexed = $rows->keyBy(fn ($row) => Carbon::parse($row->day)->toDateString());
         $days = [];
 
         for ($date = now()->subDays(self::CHART_DAYS - 1)->startOfDay(); $date <= now()->startOfDay(); $date->addDay()) {
             $key = $date->toDateString();
             $row = $indexed->get($key);
+            $sales = (int) ($row->sales ?? 0);
+            $revenue = (float) ($row->revenue ?? 0);
+            $profit = (float) ($row->profit ?? 0);
+            $itemsSold = (int) ($itemsByDay[$key] ?? 0);
+
             $days[] = [
                 'day' => $key,
                 'label' => Carbon::parse($key)->format('d.m'),
-                'sales' => (int) ($row->sales ?? 0),
-                'revenue' => (float) ($row->revenue ?? 0),
-                'profit' => (float) ($row->profit ?? 0),
-                'items_sold' => (int) ($itemsByDay[$key] ?? 0),
+                'sales' => $sales,
+                'revenue' => $revenue,
+                'profit' => $profit,
+                'items_sold' => $itemsSold,
+                'chart_value' => $revenue > 0 ? $revenue : ($itemsSold > 0 ? $itemsSold : ($sales > 0 ? $sales : 0)),
             ];
         }
 

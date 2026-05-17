@@ -23,6 +23,8 @@ class Sale extends Model
         'rejected_at',
     ];
 
+    protected $appends = ['display_title', 'sold_at'];
+
     protected $casts = [
         'subtotal' => 'decimal:2',
         'profit' => 'decimal:2',
@@ -30,6 +32,31 @@ class Sale extends Model
         'approved_at' => 'datetime',
         'rejected_at' => 'datetime',
     ];
+
+    public function getSoldAtAttribute(): ?string
+    {
+        return ($this->approved_at ?? $this->created_at)?->toIso8601String();
+    }
+
+    public function getDisplayTitleAttribute(): string
+    {
+        $at = $this->approved_at ?? $this->created_at;
+        $date = $at?->format('d.m.Y H:i') ?? '—';
+        $qty = $this->relationLoaded('items')
+            ? (int) $this->items->sum('quantity')
+            : (int) $this->items()->sum('quantity');
+        $amount = number_format((float) $this->subtotal, 0, '.', ' ');
+
+        if ($this->number && $this->number !== 'draft' && ! str_starts_with($this->number, 'S-')) {
+            return $this->number;
+        }
+
+        if ($qty > 0 && $this->subtotal > 0) {
+            return sprintf('№%d · %s · %d шт. · %s ₸', $this->id, $date, $qty, $amount);
+        }
+
+        return "Продажа №{$this->id} · {$date}";
+    }
 
     public function cashier()
     {

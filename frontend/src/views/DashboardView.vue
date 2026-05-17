@@ -21,22 +21,17 @@
     <div class="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
       <section class="panel p-4">
         <div class="mb-4 flex items-center justify-between gap-3">
-          <h2 class="font-semibold">Продажи по дням (14 дней)</h2>
-          <button class="btn-muted h-9 px-3" @click="refresh"><RefreshCw class="h-4 w-4" />Обновить</button>
+          <h2 class="font-semibold leading-none">Продажи по дням (14 дней)</h2>
+          <button type="button" class="btn-muted h-9 shrink-0 px-3" @click="refresh">
+            <RefreshCw class="h-4 w-4 shrink-0" />
+            Обновить
+          </button>
         </div>
         <div v-if="!salesByDay.length" class="h-64">
           <EmptyState title="Продаж пока нет" text="После оформления продаж график заполнится автоматически." />
         </div>
-        <div v-else class="flex h-64 items-end gap-2 overflow-hidden rounded-md bg-slate-50 p-4 dark:bg-slate-900">
-          <div v-for="day in salesByDay" :key="day.day" class="flex min-w-0 flex-1 flex-col items-center gap-2">
-            <div class="flex w-full flex-1 items-end">
-              <div class="w-full rounded-t-md bg-emerald-500" :style="{ height: barHeight(day.revenue) }" />
-            </div>
-            <span class="text-center text-[11px] leading-tight text-slate-500 dark:text-slate-400">
-              <span class="block">{{ day.label }}</span>
-              <span class="block text-[10px]">{{ day.sales }} прод. · {{ day.items_sold }} шт.</span>
-            </span>
-          </div>
+        <div v-else class="rounded-md bg-slate-50 p-3 dark:bg-slate-900">
+          <SalesDayChart :days="salesByDay" />
         </div>
       </section>
 
@@ -114,10 +109,12 @@
 
 <script setup>
 import { computed, h, onMounted, onUnmounted } from 'vue'
+import { RefreshCw } from 'lucide-vue-next'
 import { apiError } from '../api/client'
 import { resolveApiOrigin } from '../config/api'
 import { useDashboardStore } from '../stores/dashboard'
 import { useToastStore } from '../stores/toasts'
+import SalesDayChart from '../components/SalesDayChart.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import StatCard from '../components/StatCard.vue'
@@ -127,11 +124,12 @@ import { icons } from '../plugins/icons'
 function createIcon(svgString) {
   return {
     setup(_, { attrs }) {
-      return () => h('span', {
-        class: attrs.class,
-        innerHTML: svgString
-      })
-    }
+      return () =>
+        h('span', {
+          class: ['inline-flex shrink-0 items-center justify-center [&>svg]:h-full [&>svg]:w-full', attrs.class],
+          innerHTML: svgString,
+        })
+    },
   }
 }
 
@@ -140,8 +138,6 @@ const CircleDollarSign = createIcon(icons.CircleDollarSign)
 const ReceiptText = createIcon(icons.ReceiptText)
 const Clock3 = createIcon(icons.Clock3)
 const TriangleAlert = createIcon(icons.TriangleAlert)
-const RefreshCw = createIcon(icons.RefreshCw)
-
 const dashboard = useDashboardStore()
 const toast = useToastStore()
 let timer
@@ -153,7 +149,6 @@ const salesByDay = computed(() => dashboard.data?.sales_by_day || [])
 const topProducts = computed(() => dashboard.data?.top_products || [])
 const categoryRevenue = computed(() => dashboard.data?.category_revenue || [])
 const cashiers = computed(() => dashboard.data?.cashier_activity || [])
-const maxRevenue = computed(() => Math.max(...salesByDay.value.map((item) => Number(item.revenue)), 1))
 const maxCategoryRevenue = computed(() => Math.max(...categoryRevenue.value.map((item) => Number(item.revenue)), 1))
 
 function photoUrl(path) {
@@ -163,10 +158,6 @@ function photoUrl(path) {
 
 function money(value) {
   return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT', maximumFractionDigits: 0 }).format(Number(value || 0))
-}
-
-function barHeight(value) {
-  return `${Math.max(4, (Number(value || 0) / maxRevenue.value) * 100)}%`
 }
 
 function percent(value, max) {
