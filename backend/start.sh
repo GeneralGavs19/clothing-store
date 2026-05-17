@@ -98,6 +98,7 @@ ensure_env_file() {
       printf 'APP_ENV=%s\n' "${APP_ENV:-production}"
       printf 'APP_DEBUG=%s\n' "${APP_DEBUG:-false}"
       printf 'APP_URL=%s\n' "${APP_URL:-http://localhost}"
+      printf 'APP_TIMEZONE=%s\n' "${APP_TIMEZONE:-Asia/Almaty}"
       printf 'FRONTEND_URL=%s\n' "${FRONTEND_URL:-*}"
       printf 'JWT_SECRET=%s\n' "${JWT_SECRET:-}"
       printf 'JWT_TTL=%s\n' "${JWT_TTL:-480}"

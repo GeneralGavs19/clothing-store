@@ -16,7 +16,8 @@ class DashboardController extends Controller
 
     public function __invoke()
     {
-        $chartStart = now()->subDays(self::CHART_DAYS - 1)->startOfDay();
+        $range = $this->chartRange();
+        $chartStartUtc = $range['start_utc'];
         $approved = Sale::query()->where('status', 'approved');
 
         $summary = [
@@ -36,29 +37,14 @@ class DashboardController extends Controller
             'display_units' => (int) Product::query()->sum('display_quantity'),
         ];
 
-        $salesByDay = Sale::query()
-            ->where('status', 'approved')
-            ->where('approved_at', '>=', $chartStart)
-            ->selectRaw('DATE(approved_at) as day, COUNT(*) as sales, SUM(subtotal) as revenue, SUM(profit) as profit')
-            ->groupBy('day')
-            ->orderBy('day')
-            ->get();
-
-        $itemsByDay = DB::table('sale_items')
-            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
-            ->where('sales.status', 'approved')
-            ->where('sales.approved_at', '>=', $chartStart)
-            ->groupBy(DB::raw('DATE(sales.approved_at)'))
-            ->orderBy(DB::raw('DATE(sales.approved_at)'))
-            ->selectRaw('DATE(sales.approved_at) as day, SUM(sale_items.quantity) as items_sold')
-            ->get()
-            ->mapWithKeys(fn ($row) => [Carbon::parse($row->day)->toDateString() => (int) $row->items_sold]);
+        $salesByDay = $this->aggregateSalesByLocalDay($chartStartUtc);
+        $itemsByDay = $this->aggregateItemsByLocalDay($chartStartUtc);
 
         $topProducts = DB::table('sale_items')
             ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
             ->join('products', 'products.id', '=', 'sale_items.product_id')
             ->where('sales.status', 'approved')
-            ->where('sales.approved_at', '>=', $chartStart)
+            ->where('sales.approved_at', '>=', $chartStartUtc)
             ->groupBy('products.id', 'products.name', 'products.sku', 'products.photo_path')
             ->orderByDesc(DB::raw('SUM(sale_items.quantity)'))
             ->limit(10)
@@ -84,7 +70,7 @@ class DashboardController extends Controller
             ->join('products', 'products.id', '=', 'sale_items.product_id')
             ->leftJoin('categories', 'categories.id', '=', 'products.category_id')
             ->where('sales.status', 'approved')
-            ->where('sales.approved_at', '>=', $chartStart)
+            ->where('sales.approved_at', '>=', $chartStartUtc)
             ->groupBy('categories.id', 'categories.name')
             ->orderByDesc(DB::raw('SUM(sale_items.line_total)'))
             ->limit(8)
@@ -108,7 +94,8 @@ class DashboardController extends Controller
         return response()->json([
             'summary' => $summary,
             'chart_days' => self::CHART_DAYS,
-            'sales_by_day' => $this->fillDays($salesByDay, $itemsByDay),
+            'store_timezone' => config('app.timezone'),
+            'sales_by_day' => $this->fillDays($salesByDay, $itemsByDay, $range),
             'top_products' => $topProducts,
             'category_revenue' => $categoryRevenue,
             'low_stock_products' => Product::query()
@@ -123,6 +110,57 @@ class DashboardController extends Controller
         ]);
     }
 
+    private function storeTimezone(): string
+    {
+        return config('app.timezone', 'Asia/Almaty');
+    }
+
+    /** @return array{start_local: Carbon, end_local: Carbon, start_utc: Carbon} */
+    private function chartRange(): array
+    {
+        $tz = $this->storeTimezone();
+        $endLocal = now($tz)->startOfDay();
+        $startLocal = $endLocal->copy()->subDays(self::CHART_DAYS - 1);
+
+        return [
+            'start_local' => $startLocal,
+            'end_local' => $endLocal,
+            'start_utc' => $startLocal->copy()->utc(),
+        ];
+    }
+
+    private function localDateKey($approvedAt): string
+    {
+        return Carbon::parse($approvedAt)->timezone($this->storeTimezone())->toDateString();
+    }
+
+    private function aggregateSalesByLocalDay(Carbon $chartStartUtc)
+    {
+        return Sale::query()
+            ->where('status', 'approved')
+            ->where('approved_at', '>=', $chartStartUtc)
+            ->get(['approved_at', 'subtotal', 'profit'])
+            ->groupBy(fn (Sale $sale) => $this->localDateKey($sale->approved_at))
+            ->map(fn ($group, $day) => (object) [
+                'day' => $day,
+                'sales' => $group->count(),
+                'revenue' => (float) $group->sum('subtotal'),
+                'profit' => (float) $group->sum('profit'),
+            ]);
+    }
+
+    private function aggregateItemsByLocalDay(Carbon $chartStartUtc): array
+    {
+        return DB::table('sale_items')
+            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+            ->where('sales.status', 'approved')
+            ->where('sales.approved_at', '>=', $chartStartUtc)
+            ->get(['sale_items.quantity', 'sales.approved_at'])
+            ->groupBy(fn ($row) => $this->localDateKey($row->approved_at))
+            ->map(fn ($group) => (int) $group->sum('quantity'))
+            ->all();
+    }
+
     private function todayItemsSold(): int
     {
         return (int) DB::table('sale_items')
@@ -132,12 +170,13 @@ class DashboardController extends Controller
             ->sum('sale_items.quantity');
     }
 
-    private function fillDays($rows, $itemsByDay): array
+    private function fillDays($rows, array $itemsByDay, array $range): array
     {
-        $indexed = $rows->keyBy(fn ($row) => Carbon::parse($row->day)->toDateString());
+        $indexed = $rows->keyBy('day');
         $days = [];
+        $date = $range['start_local']->copy();
 
-        for ($date = now()->subDays(self::CHART_DAYS - 1)->startOfDay(); $date <= now()->startOfDay(); $date->addDay()) {
+        while ($date->lte($range['end_local'])) {
             $key = $date->toDateString();
             $row = $indexed->get($key);
             $sales = (int) ($row->sales ?? 0);
@@ -147,13 +186,15 @@ class DashboardController extends Controller
 
             $days[] = [
                 'day' => $key,
-                'label' => Carbon::parse($key)->format('d.m'),
+                'label' => $date->format('d.m'),
                 'sales' => $sales,
                 'revenue' => $revenue,
                 'profit' => $profit,
                 'items_sold' => $itemsSold,
                 'chart_value' => $revenue > 0 ? $revenue : ($itemsSold > 0 ? $itemsSold : ($sales > 0 ? $sales : 0)),
             ];
+
+            $date->addDay();
         }
 
         return $days;
