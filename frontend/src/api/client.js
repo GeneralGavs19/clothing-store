@@ -26,7 +26,9 @@ api.interceptors.response.use(
 export function apiError(error) {
   const data = error.response?.data
   if (data?.errors) return Object.values(data.errors).flat().join(' ')
-  return data?.message || error.message || 'Ошибка запроса'
+  const message = data?.message || error.message || 'Ошибка запроса'
+  if (message === 'Server Error') return 'Ошибка сервера. Попробуйте позже или обратитесь к администратору.'
+  return message
 }
 
 export default api

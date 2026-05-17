@@ -29,18 +29,30 @@ export const icons = {
 // Создаем Vue компоненты для каждой иконки
 import { h } from 'vue'
 
+function normalizeSvg(svgString) {
+  return svgString
+    .replace('<svg ', '<svg width="100%" height="100%" ')
+    .replace(/\s(width|height)="24"/g, '')
+}
+
+/** SVG-иконка с корректным центрированием (классы h-4 w-4 на компоненте). */
 export function createIconComponent(svgString) {
+  const svg = normalizeSvg(svgString)
+
   return {
     name: 'Icon',
-    props: ['class'],
-    setup(props, { attrs }) {
-      return () => h('span', {
-        class: attrs.class || '',
-        innerHTML: svgString
-      })
-    }
+    inheritAttrs: false,
+    setup(_, { attrs }) {
+      return () =>
+        h('span', {
+          class: ['icon inline-flex shrink-0 items-center justify-center leading-none', attrs.class],
+          innerHTML: svg,
+        })
+    },
   }
 }
+
+export const createIcon = createIconComponent
 
 // Экспортируем все иконки как Vue компоненты
 export const IconCircleDollarSign = createIconComponent(icons.CircleDollarSign)

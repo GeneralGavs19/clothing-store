@@ -12,7 +12,7 @@
             <RefreshCw class="h-4 w-4" />
           </button>
         </div>
-        <input v-model="productSearch" class="input" placeholder="Поиск по названию или SKU" @input="debouncedProducts" />
+        <input v-model="productSearch" class="input" placeholder="Поиск по названию или коду" @input="debouncedProducts" />
         <div class="mt-4 max-h-[28rem] space-y-2 overflow-y-auto pr-1">
           <SkeletonBlock v-if="catalog.loadingProducts" custom-class="h-20" />
           <EmptyState
@@ -34,7 +34,7 @@
             <div class="min-w-0 flex-1">
               <div class="truncate text-sm font-medium">{{ product.name }}</div>
               <div class="text-xs text-slate-500">
-                {{ product.sku }} · склад {{ product.stock_quantity }} · витрина {{ product.display_quantity }}
+                код {{ product.sku }} · склад {{ product.stock_quantity }} · витрина {{ product.display_quantity }}
               </div>
             </div>
             <div class="text-sm font-semibold">{{ money(product.sale_price) }}</div>

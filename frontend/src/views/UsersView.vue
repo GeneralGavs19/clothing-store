@@ -17,7 +17,7 @@
           <div>
             <div class="flex items-center gap-2">
               <h3 class="font-medium">{{ user.name }}</h3>
-              <span class="badge" :class="user.role === 'admin' ? 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'">{{ user.role }}</span>
+              <span class="badge" :class="user.role === 'admin' ? 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'">{{ user.role === 'admin' ? 'Администратор' : 'Кассир' }}</span>
               <span v-if="!user.is_active" class="badge bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300">Отключен</span>
             </div>
             <p class="mt-1 text-sm text-slate-500">{{ user.email }}</p>

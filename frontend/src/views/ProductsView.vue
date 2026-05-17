@@ -3,7 +3,7 @@
     <section class="panel p-4">
       <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <input v-model="filters.search" class="input" placeholder="Поиск" @input="debouncedFetch" />
+          <input v-model="filters.search" class="input" placeholder="Поиск по названию или коду" @input="debouncedFetch" />
           <select v-model="filters.category_id" class="select" @change="fetchProducts(1)">
             <option value="">Все категории</option>
             <option v-for="category in catalog.categories" :key="category.id" :value="category.id">{{ category.name }}</option>
@@ -45,24 +45,37 @@
                 </div>
               </button>
               <button type="button" class="min-w-0 text-left" @click="detail = product">
-                <div class="truncate font-medium">{{ product.name }}</div>
-                <div class="text-xs text-slate-500">{{ product.sku }} · {{ product.category?.name || 'Без категории' }}</div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="truncate font-medium">{{ product.name }}</span>
+                  <span class="badge shrink-0" :class="statusClass(product.status)">{{ statusLabel(product.status) }}</span>
+                </div>
+                <div class="text-xs text-slate-500">
+                  код {{ product.sku }} · {{ product.category?.name || 'Без категории' }}
+                </div>
               </button>
             </div>
             <div class="flex items-center gap-3">
               <div class="text-sm font-semibold">{{ money(product.sale_price) }}</div>
-              <div class="text-sm text-slate-500">{{ product.display_quantity }} / {{ product.stock_quantity }}</div>
+              <div class="text-xs text-slate-500" title="Витрина / склад">
+                витр. {{ product.display_quantity }} · склад {{ product.stock_quantity }}
+              </div>
               <div class="flex items-center gap-2">
-                <button v-if="auth.isAdmin && product.stock_quantity > 0" class="btn-muted h-8 px-3" @click="moveToDisplay(product)">
+                <button
+                  v-if="auth.isAdmin && product.stock_quantity > 0"
+                  type="button"
+                  class="btn-icon"
+                  title="На витрину (1 шт.)"
+                  @click="moveToDisplay(product)"
+                >
                   <ArrowRightLeft class="h-4 w-4" />
                 </button>
-                <button class="btn-muted h-8 px-3" @click="detail = product">
+                <button type="button" class="btn-icon" title="Карточка" @click="detail = product">
                   <Eye class="h-4 w-4" />
                 </button>
-                <button v-if="auth.isAdmin" class="btn-muted h-8 px-3" @click="openEdit(product)">
+                <button v-if="auth.isAdmin" type="button" class="btn-icon" title="Редактировать" @click="openEdit(product)">
                   <Pencil class="h-4 w-4" />
                 </button>
-                <button v-if="auth.isAdmin" class="btn-danger h-8 px-3" @click="confirmDelete(product)">
+                <button v-if="auth.isAdmin" type="button" class="btn-icon !border-rose-200 !text-rose-600" title="Удалить" @click="confirmDelete(product)">
                   <X class="h-4 w-4" />
                 </button>
               </div>
@@ -80,8 +93,8 @@
           <input v-model="form.name" class="input" required />
         </label>
         <label class="block">
-          <span class="mb-1 block text-sm font-medium">SKU</span>
-          <input v-model="form.sku" class="input" required />
+          <span class="mb-1 block text-sm font-medium">Код товара</span>
+          <input v-model="form.sku" class="input" required placeholder="Например: SAM-GAL-001" />
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium">Категория</span>
@@ -108,6 +121,7 @@
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium">Порог остатка</span>
+          <p class="mb-1 text-xs text-slate-500">Если сумма склада и витрины ≤ порога — товар в «Низкий остаток»</p>
           <input v-model.number="form.low_stock_threshold" class="input" type="number" min="0" />
         </label>
         <label class="block">
@@ -136,7 +150,7 @@
           </div>
           <div>
             <h2 class="text-xl font-semibold">{{ detail.name }}</h2>
-            <p class="text-sm text-slate-500">{{ detail.sku }}</p>
+            <p class="text-sm text-slate-500">Код: {{ detail.sku }}</p>
             <p class="mt-2 text-sm">{{ detail.category?.name || 'Без категории' }}</p>
           </div>
         </div>
@@ -146,7 +160,8 @@
           <Info label="Склад" :value="detail.stock_quantity" />
           <Info label="Витрина" :value="detail.display_quantity" />
           <Info label="Общий остаток" :value="detail.total_quantity" />
-          <Info label="Обновлен" :value="date(detail.updated_at)" />
+          <Info label="Порог остатка" :value="detail.low_stock_threshold" />
+          <Info label="Обновлён" :value="date(detail.updated_at)" />
         </div>
         <p v-if="detail.description" class="text-sm text-slate-600 dark:text-slate-300">{{ detail.description }}</p>
       </div>
@@ -155,8 +170,10 @@
 </template>
 
 <script setup>
-import { computed, h, onMounted, reactive, ref } from 'vue'
-import { icons } from '../plugins/icons'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { ArrowRightLeft, Eye, LoaderCircle, Pencil, Plus, X } from 'lucide-vue-next'
+import { createIcon, icons } from '../plugins/icons'
 import { apiError } from '../api/client'
 import { resolveApiOrigin } from '../config/api'
 import { useAuthStore } from '../stores/auth'
@@ -167,27 +184,9 @@ import ModalPanel from '../components/ui/ModalPanel.vue'
 import PaginationBar from '../components/ui/PaginationBar.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 
-// Функция для создания Vue компонента из SVG строки
-function createIcon(svgString) {
-  return {
-    setup(_, { attrs }) {
-      return () => h('span', {
-        class: attrs.class,
-        innerHTML: svgString
-      })
-    }
-  }
-}
-
-// Создаем иконки
 const Package = createIcon(icons.Package)
-const Plus = createIcon(icons.Plus)
-const Eye = createIcon(icons.Search)
-const Pencil = createIcon(icons.Edit)
-const LoaderCircle = createIcon(icons.RefreshCw)
-const ArrowRightLeft = createIcon(icons.RefreshCw)
-const X = createIcon(icons.X)
 
+const route = useRoute()
 const auth = useAuthStore()
 const catalog = useCatalogStore()
 const toast = useToastStore()
@@ -274,8 +273,26 @@ function date(value) {
 }
 
 function statusLabel(status) {
-  return { active: 'Активен', low_stock: 'Мало', out_of_stock: 'Нет', archived: 'Архив' }[status] || status
+  return {
+    active: 'В наличии',
+    low_stock: 'Мало',
+    out_of_stock: 'Нет в наличии',
+    archived: 'Архив',
+  }[status] || status
 }
+
+function applyRouteFilters() {
+  if (route.query.status) filters.status = String(route.query.status)
+  if (route.query.search) filters.search = String(route.query.search)
+}
+
+watch(
+  () => route.query,
+  () => {
+    applyRouteFilters()
+    fetchProducts(1)
+  },
+)
 
 function statusClass(status) {
   return {
@@ -288,6 +305,7 @@ function statusClass(status) {
 
 onMounted(async () => {
   await catalog.fetchCategories()
+  applyRouteFilters()
   fetchProducts()
 })
 

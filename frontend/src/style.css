@@ -30,8 +30,28 @@ body {
     @apply inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-emerald-400 disabled:cursor-not-allowed disabled:opacity-60;
   }
 
-  .btn :is(svg, [class*='icon']) {
-    @apply shrink-0;
+  .btn :is(svg, .icon) {
+    @apply h-4 w-4 shrink-0;
+  }
+
+  .icon svg {
+    @apply block h-full w-full;
+  }
+
+  .btn-icon {
+    @apply btn-muted inline-flex h-9 w-9 shrink-0 items-center justify-center p-0;
+  }
+
+  .btn-icon :is(svg, .icon) {
+    @apply h-4 w-4;
+  }
+
+  .stat-icon {
+    @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-lg;
+  }
+
+  .stat-icon :is(svg, .icon) {
+    @apply h-4 w-4;
   }
 
   .btn-primary {

@@ -21,19 +21,19 @@
     <div class="lg:pl-64">
       <header class="sticky top-0 z-20 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
         <div class="flex items-center justify-between gap-3">
-          <button class="btn-muted h-10 w-10 px-0 lg:hidden" @click="mobileOpen = true">
-            <Menu class="h-5 w-5" />
+          <button class="btn-icon h-10 w-10 lg:hidden" title="Меню" @click="mobileOpen = true">
+            <Menu class="h-4 w-4" />
           </button>
           <div class="min-w-0">
             <h1 class="truncate text-base font-semibold sm:text-lg">{{ routeTitle }}</h1>
             <p class="hidden text-xs text-slate-500 dark:text-slate-400 sm:block">{{ auth.user?.email }}</p>
           </div>
           <div class="flex items-center gap-2">
-            <button class="btn-muted h-10 w-10 px-0" @click="toggleTheme" :title="dark ? 'Светлая тема' : 'Темная тема'">
+            <button class="btn-icon h-10 w-10" :title="dark ? 'Светлая тема' : 'Тёмная тема'" @click="toggleTheme">
               <Sun v-if="dark" class="h-4 w-4" />
               <Moon v-else class="h-4 w-4" />
             </button>
-            <button class="btn-muted h-10 w-10 px-0" @click="logout" title="Выйти">
+            <button class="btn-icon h-10 w-10" title="Выйти" @click="logout">
               <LogOut class="h-4 w-4" />
             </button>
           </div>
@@ -49,7 +49,7 @@
       <div class="h-full w-72 bg-white p-4 dark:bg-slate-950" @click.stop>
         <div class="mb-6 flex items-center justify-between">
           <div class="font-semibold">Durability Store</div>
-          <button class="btn-muted h-9 w-9 px-0" @click="mobileOpen = false"><X class="h-4 w-4" /></button>
+          <button class="btn-icon" title="Закрыть" @click="mobileOpen = false"><X class="h-4 w-4" /></button>
         </div>
         <nav class="space-y-1">
           <RouterLink v-for="item in visibleNav" :key="item.to" :to="item.to" class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200" active-class="bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" @click="mobileOpen = false">
@@ -63,24 +63,11 @@
 </template>
 
 <script setup>
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { icons } from '../plugins/icons'
+import { createIcon, icons } from '../plugins/icons'
 
-// Функция для создания Vue компонента из SVG строки
-function createIcon(svgString) {
-  return {
-    setup(_, { attrs }) {
-      return () => h('span', {
-        class: attrs.class,
-        innerHTML: svgString
-      })
-    }
-  }
-}
-
-// Создаем иконки
 const ChartNoAxesCombined = createIcon(icons.LayoutDashboard)
 const PackageSearch = createIcon(icons.Package)
 const ClipboardList = createIcon(icons.FileText)
@@ -101,7 +88,7 @@ const mobileOpen = ref(false)
 const dark = ref(localStorage.getItem('theme') === 'dark')
 
 const nav = [
-  { to: '/dashboard', label: 'Dashboard', icon: ChartNoAxesCombined },
+  { to: '/dashboard', label: 'Обзор', icon: ChartNoAxesCombined },
   { to: '/products', label: 'Товары', icon: PackageSearch },
   { to: '/sales', label: 'Продажи', icon: ClipboardList },
   { to: '/categories', label: 'Категории', icon: Folders, admin: true },

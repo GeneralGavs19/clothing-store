@@ -7,7 +7,7 @@
             <h2 class="text-lg font-semibold text-slate-950 dark:text-white">{{ title }}</h2>
             <p v-if="subtitle" class="mt-1 text-sm text-slate-500 dark:text-slate-400">{{ subtitle }}</p>
           </div>
-          <button class="btn-muted h-9 w-9 px-0" type="button" @click="$emit('close')">
+          <button class="btn-icon" type="button" title="Закрыть" @click="$emit('close')">
             <X class="h-4 w-4" />
           </button>
         </div>
@@ -18,20 +18,7 @@
 </template>
 
 <script setup>
-import { h } from 'vue'
-import { icons } from '../../plugins/icons'
-
-// Функция для создания Vue компонента из SVG строки
-function createIcon(svgString) {
-  return {
-    setup(_, { attrs }) {
-      return () => h('span', {
-        class: attrs.class,
-        innerHTML: svgString
-      })
-    }
-  }
-}
+import { createIcon, icons } from '../../plugins/icons'
 
 const X = createIcon(icons.X)
 
