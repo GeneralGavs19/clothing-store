@@ -112,7 +112,7 @@
     <section class="panel overflow-hidden">
       <div class="flex flex-col gap-3 border-b border-slate-200 p-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 class="font-semibold">Проданные товары</h2>
+          <h2 class="font-semibold">Проданное</h2>
           <p class="text-xs text-slate-500">Все оформленные продажи сохраняются в базе</p>
         </div>
         <select v-model="historyStatus" class="select sm:max-w-48" @change="fetchHistory(1)">
@@ -136,7 +136,7 @@
                 :key="item.id"
                 class="flex flex-wrap items-center gap-2 text-sm text-slate-600 dark:text-slate-300"
               >
-                <span class="font-medium">{{ item.product?.name }}</span>
+                <span class="font-medium">{{ item.display_name || item.product_name || item.product?.name }}</span>
                 <span class="text-slate-400">× {{ item.quantity }}</span>
                 <span class="badge bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                   {{ sourceLabel(item.source_location) }}
@@ -191,9 +191,7 @@ let timer
 const apiBase = computed(() => resolveApiOrigin())
 
 const availableProducts = computed(() =>
-  catalog.products.filter(
-    (p) => p.status !== 'archived' && (Number(p.display_quantity) > 0 || Number(p.stock_quantity) > 0),
-  ),
+  catalog.products.filter((p) => Number(p.display_quantity) > 0 || Number(p.stock_quantity) > 0),
 )
 
 const cartTotal = computed(() =>

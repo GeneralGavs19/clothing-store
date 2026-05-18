@@ -90,7 +90,7 @@ class ReportController extends Controller
 
         $categoryRows = DB::table('sale_items')
             ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
-            ->join('products', 'products.id', '=', 'sale_items.product_id')
+            ->leftJoin('products', 'products.id', '=', 'sale_items.product_id')
             ->leftJoin('categories', 'categories.id', '=', 'products.category_id')
             ->where('sales.status', 'approved')
             ->selectRaw('DATE(sales.approved_at) as date, COALESCE(categories.name, "Без категории") as category, SUM(sale_items.line_total) as revenue')

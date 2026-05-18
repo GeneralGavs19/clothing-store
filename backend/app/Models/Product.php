@@ -57,10 +57,6 @@ class Product extends Model
 
     public function refreshStatus(): void
     {
-        if ($this->status === 'archived') {
-            return;
-        }
-
         $total = $this->total_quantity;
         $this->status = match (true) {
             $total === 0 => 'out_of_stock',

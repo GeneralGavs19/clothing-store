@@ -86,21 +86,34 @@ class ProductController extends Controller
 
     public function destroy(Request $request, Product $product, ActivityLogger $logger)
     {
-        if ($product->saleItems()->exists()) {
-            $product->update(['status' => 'archived']);
-            $logger->log('products.archived', $product, [], $request);
+        $product->load('category');
+        $hadSales = $product->saleItems()->exists();
 
-            return response()->json(['message' => 'Product has history and was archived.', 'product' => $product]);
-        }
+        $meta = [
+            'product_id' => $product->id,
+            'name' => $product->name,
+            'sku' => $product->sku,
+            'category' => $product->category?->name,
+            'purchase_price' => (float) $product->purchase_price,
+            'sale_price' => (float) $product->sale_price,
+            'stock_quantity' => (int) $product->stock_quantity,
+            'display_quantity' => (int) $product->display_quantity,
+            'had_sales' => $hadSales,
+            'deleted_by' => $request->user()->only(['id', 'name', 'email', 'role']),
+        ];
 
         if ($product->photo_path) {
             Storage::disk('public')->delete($product->photo_path);
         }
 
-        $logger->log('products.deleted', $product, ['sku' => $product->sku], $request);
+        $logger->log('products.deleted', $product, $meta, $request);
         $product->delete();
 
-        return response()->json(['message' => 'Product deleted.']);
+        return response()->json([
+            'message' => $hadSales
+                ? 'Товар удалён. История продаж сохранена.'
+                : 'Товар удалён.',
+        ]);
     }
 
     private function validated(Request $request, ?Product $product = null): array
@@ -115,7 +128,7 @@ class ProductController extends Controller
             'stock_quantity' => [$product ? 'sometimes' : 'required', 'integer', 'min:0'],
             'display_quantity' => [$product ? 'sometimes' : 'required', 'integer', 'min:0'],
             'low_stock_threshold' => ['sometimes', 'integer', 'min:0'],
-            'status' => ['sometimes', Rule::in(['active', 'low_stock', 'out_of_stock', 'archived'])],
+            'status' => ['sometimes', Rule::in(['active', 'low_stock', 'out_of_stock'])],
             'photo' => ['nullable', 'image', 'max:4096'],
         ];
 

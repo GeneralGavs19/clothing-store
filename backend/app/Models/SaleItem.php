@@ -12,6 +12,8 @@ class SaleItem extends Model
     protected $fillable = [
         'sale_id',
         'product_id',
+        'product_name',
+        'product_sku',
         'quantity',
         'source_location',
         'purchase_price',
@@ -19,6 +21,8 @@ class SaleItem extends Model
         'line_total',
         'line_profit',
     ];
+
+    protected $appends = ['display_name'];
 
     protected $casts = [
         'quantity' => 'integer',
@@ -36,5 +40,10 @@ class SaleItem extends Model
     public function product()
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function getDisplayNameAttribute(): string
+    {
+        return $this->product_name ?: $this->product?->name ?: 'Удалённый товар';
     }
 }

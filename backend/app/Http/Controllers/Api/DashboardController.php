@@ -31,7 +31,7 @@ class DashboardController extends Controller
             'today_items_sold' => $this->todayItemsSold(),
             'week_revenue' => (float) (clone $approved)->whereBetween('approved_at', [now()->startOfWeek(), now()->endOfWeek()])->sum('subtotal'),
             'month_revenue' => (float) (clone $approved)->whereMonth('approved_at', now()->month)->whereYear('approved_at', now()->year)->sum('subtotal'),
-            'products' => (int) Product::query()->where('status', '!=', 'archived')->count(),
+            'products' => (int) Product::query()->count(),
             'low_stock' => (int) Product::query()->whereRaw('(stock_quantity + display_quantity) <= low_stock_threshold')->count(),
             'stock_units' => (int) Product::query()->sum('stock_quantity'),
             'display_units' => (int) Product::query()->sum('display_quantity'),
@@ -42,16 +42,21 @@ class DashboardController extends Controller
 
         $topProducts = DB::table('sale_items')
             ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
-            ->join('products', 'products.id', '=', 'sale_items.product_id')
+            ->leftJoin('products', 'products.id', '=', 'sale_items.product_id')
             ->where('sales.status', 'approved')
             ->where('sales.approved_at', '>=', $chartStartUtc)
-            ->groupBy('products.id', 'products.name', 'products.sku', 'products.photo_path')
+            ->groupBy(
+                DB::raw('COALESCE(products.id, sale_items.product_id)'),
+                DB::raw('COALESCE(sale_items.product_name, products.name)'),
+                DB::raw('COALESCE(sale_items.product_sku, products.sku)'),
+                'products.photo_path',
+            )
             ->orderByDesc(DB::raw('SUM(sale_items.quantity)'))
             ->limit(10)
             ->get([
-                'products.id',
-                'products.name',
-                'products.sku',
+                DB::raw('COALESCE(products.id, sale_items.product_id) as id'),
+                DB::raw('COALESCE(sale_items.product_name, products.name) as name'),
+                DB::raw('COALESCE(sale_items.product_sku, products.sku) as sku'),
                 'products.photo_path',
                 DB::raw('SUM(sale_items.quantity) as quantity'),
                 DB::raw('SUM(sale_items.line_total) as revenue'),
@@ -67,7 +72,7 @@ class DashboardController extends Controller
 
         $categoryRevenue = DB::table('sale_items')
             ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
-            ->join('products', 'products.id', '=', 'sale_items.product_id')
+            ->leftJoin('products', 'products.id', '=', 'sale_items.product_id')
             ->leftJoin('categories', 'categories.id', '=', 'products.category_id')
             ->where('sales.status', 'approved')
             ->where('sales.approved_at', '>=', $chartStartUtc)

@@ -13,7 +13,6 @@
             <option value="active">Активен</option>
             <option value="low_stock">Низкий остаток</option>
             <option value="out_of_stock">Нет в наличии</option>
-            <option value="archived">Архив</option>
           </select>
           <select v-model="filters.sort" class="select" @change="fetchProducts(1)">
             <option value="updated_at">По обновлению</option>
@@ -277,7 +276,6 @@ function statusLabel(status) {
     active: 'В наличии',
     low_stock: 'Мало',
     out_of_stock: 'Нет в наличии',
-    archived: 'Архив',
   }[status] || status
 }
 
@@ -299,7 +297,6 @@ function statusClass(status) {
     active: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
     low_stock: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
     out_of_stock: 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300',
-    archived: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
   }[status]
 }
 
@@ -310,10 +307,11 @@ onMounted(async () => {
 })
 
 async function confirmDelete(product) {
-  if (!confirm(`Удалить товар "${product.name}"?`)) return
+  const warning = product.total_quantity > 0 ? '\n\nОстатки на складе и витрине будут списаны.' : ''
+  if (!confirm(`Удалить товар "${product.name}"?${warning}`)) return
   try {
-    await catalog.deleteProduct(product.id)
-    toast.push('Товар удалён')
+    const { data } = await catalog.deleteProduct(product.id)
+    toast.push(data?.message || 'Товар удалён')
     await fetchProducts(filters.page)
   } catch (error) {
     toast.push(apiError(error), 'error')

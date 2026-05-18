@@ -20,6 +20,10 @@ class ActivityLogController extends Controller
             $query->where('action', $request->string('action')->toString());
         }
 
+        if ($request->boolean('deleted_products')) {
+            $query->where('action', 'products.deleted');
+        }
+
         return response()->json(ApiPagination::format($query->paginate($request->integer('per_page', 20))));
     }
 }

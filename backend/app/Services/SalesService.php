@@ -49,6 +49,8 @@ class SalesService
 
                 $sale->items()->create([
                     'product_id' => $product->id,
+                    'product_name' => $product->name,
+                    'product_sku' => $product->sku,
                     'quantity' => $quantity,
                     'source_location' => $source,
                     'purchase_price' => $purchase,
@@ -251,7 +253,7 @@ class SalesService
         foreach ($requested as $row) {
             $product = $products->get($row['product_id']);
 
-            if (! $product || $product->status === 'archived') {
+            if (! $product) {
                 throw ValidationException::withMessages(['items' => 'Товар недоступен для продажи.']);
             }
 
