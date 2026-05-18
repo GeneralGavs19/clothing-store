@@ -19,18 +19,15 @@ Route::middleware('jwt')->group(function () {
     Route::get('auth/me', [AuthController::class, 'me']);
     Route::post('auth/logout', [AuthController::class, 'logout']);
 
-    Route::get('dashboard', DashboardController::class);
-
     Route::get('products', [ProductController::class, 'index']);
     Route::get('products/{product}', [ProductController::class, 'show']);
     Route::get('categories', [CategoryController::class, 'index']);
     Route::get('categories/{category}', [CategoryController::class, 'show']);
     Route::post('sales', [SaleController::class, 'store']);
     Route::get('sales', [SaleController::class, 'index']);
-    Route::get('logs', [ActivityLogController::class, 'index']);
 
-    Route::middleware('role:admin')->group(function () {
-        Route::post('auth/register', [AuthController::class, 'register']);
+    Route::middleware('role:admin,admin_programmer')->group(function () {
+        Route::get('dashboard', DashboardController::class);
 
         Route::apiResource('categories', CategoryController::class)->except(['index', 'show']);
         Route::apiResource('products', ProductController::class)->except(['index', 'show']);
@@ -40,14 +37,20 @@ Route::middleware('jwt')->group(function () {
         Route::post('sales/{sale}/reject', [SaleController::class, 'reject']);
         Route::delete('sales/{sale}', [SaleController::class, 'destroy']);
 
-        Route::apiResource('users', UserController::class)->except(['show']);
-
         Route::get('stock-movements', [StockController::class, 'movements']);
         Route::post('stock/transfer', [StockController::class, 'transfer']);
         Route::post('stock/adjust', [StockController::class, 'adjust']);
 
-        Route::get('reports/sales.csv', [ReportController::class, 'salesCsv']);
+        Route::get('reports/sales.xlsx', [ReportController::class, 'salesExcel']);
         Route::get('reports/backup', [ReportController::class, 'backup']);
         Route::post('reports/rebuild-statistics', [ReportController::class, 'rebuildStatistics']);
+    });
+
+    Route::middleware('role:admin_programmer')->group(function () {
+        Route::post('auth/register', [AuthController::class, 'register']);
+
+        Route::apiResource('users', UserController::class)->except(['show']);
+
+        Route::get('logs', [ActivityLogController::class, 'index']);
     });
 });

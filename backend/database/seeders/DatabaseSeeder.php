@@ -19,7 +19,8 @@ class DatabaseSeeder extends Seeder
             ['email' => env('ADMIN_EMAIL', 'admin@store.local')],
             [
                 'name' => env('ADMIN_NAME', 'Store Admin'),
-                'role' => 'admin',
+                'role' => 'admin_programmer',
+                'password_plain' => env('ADMIN_PASSWORD', 'ChangeMe123!'),
                 'is_active' => true,
                 // Plain password — the User model "hashed" cast hashes it once.
                 'password' => env('ADMIN_PASSWORD', 'ChangeMe123!'),

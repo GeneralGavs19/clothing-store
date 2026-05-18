@@ -13,8 +13,8 @@ class ActivityLogController extends Controller
     {
         $query = ActivityLog::query()->with('user:id,name,email,role')->latest();
 
-        if (! $request->user()->isAdmin()) {
-            $query->where('user_id', $request->user()->id);
+        if (! $request->user()->canViewActivityLogs()) {
+            return response()->json(['message' => 'Forbidden.'], 403);
         }
         if ($request->filled('action')) {
             $query->where('action', $request->string('action')->toString());

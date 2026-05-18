@@ -22,7 +22,7 @@
             <option value="display_quantity">По витрине</option>
           </select>
         </div>
-        <button v-if="auth.isAdmin" class="btn-primary w-full sm:ml-auto sm:w-auto" @click="openCreate">
+        <button v-if="auth.canManageCatalog" class="btn-primary w-full sm:ml-auto sm:w-auto" @click="openCreate">
           <Plus class="h-4 w-4" />Товар
         </button>
       </div>
@@ -65,7 +65,7 @@
             </div>
             <div class="flex shrink-0 items-center gap-1.5">
               <button
-                v-if="auth.isAdmin && product.stock_quantity > 0"
+                v-if="auth.canManageCatalog && product.stock_quantity > 0"
                 type="button"
                 class="btn-icon"
                 title="На витрину (1 шт.)"
@@ -76,11 +76,11 @@
               <button type="button" class="btn-icon" title="Карточка" @click="detail = product">
                 <Eye class="h-4 w-4" />
               </button>
-              <button v-if="auth.isAdmin" type="button" class="btn-icon" title="Редактировать" @click="openEdit(product)">
+              <button v-if="auth.canManageCatalog" type="button" class="btn-icon" title="Редактировать" @click="openEdit(product)">
                 <Pencil class="h-4 w-4" />
               </button>
               <button
-                v-if="auth.isAdmin"
+                v-if="auth.canManageCatalog"
                 type="button"
                 class="btn-icon !border-rose-200 !text-rose-600"
                 title="Удалить"

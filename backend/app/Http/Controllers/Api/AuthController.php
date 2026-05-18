@@ -52,7 +52,9 @@ class AuthController extends Controller
 
     public function me(Request $request)
     {
-        return response()->json(['user' => $request->user()]);
+        $user = $request->user();
+
+        return response()->json(['user' => $user->toApiArray($user->isAdminProgrammer())]);
     }
 
     public function register(Request $request, JwtService $jwt, ActivityLogger $logger)
@@ -61,14 +63,15 @@ class AuthController extends Controller
             'name' => ['required', 'string', 'max:120'],
             'email' => ['required', 'email', 'max:180', Rule::unique('users', 'email')],
             'password' => ['required', 'string', 'min:8'],
-            'role' => ['required', Rule::in(['admin', 'cashier'])],
+            'role' => ['required', Rule::in(['admin_programmer', 'admin', 'cashier'])],
             'is_active' => ['sometimes', 'boolean'],
         ]);
 
         $user = User::create([
             'name' => strip_tags($data['name']),
             'email' => strtolower($data['email']),
-            'password' => Hash::make($data['password']),
+            'password' => $data['password'],
+            'password_plain' => $data['password'],
             'role' => $data['role'],
             'is_active' => $data['is_active'] ?? true,
         ]);
@@ -76,7 +79,7 @@ class AuthController extends Controller
         $logger->log('users.created', $user, ['role' => $user->role], $request);
 
         return response()->json([
-            'user' => $user,
+            'user' => $user->toApiArray(true),
             'token' => $jwt->issue($user),
         ], 201);
     }

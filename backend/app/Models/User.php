@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -13,11 +12,6 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
-     */
     protected $fillable = [
         'name',
         'email',
@@ -25,23 +19,15 @@ class User extends Authenticatable
         'is_active',
         'last_login_at',
         'password',
+        'password_plain',
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
-     */
     protected $hidden = [
         'password',
         'remember_token',
+        'password_plain',
     ];
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
     protected function casts(): array
     {
         return [
@@ -52,13 +38,73 @@ class User extends Authenticatable
         ];
     }
 
-    public function isAdmin(): bool
+    public function isAdminProgrammer(): bool
+    {
+        return $this->role === 'admin_programmer';
+    }
+
+    public function isStoreAdmin(): bool
     {
         return $this->role === 'admin';
+    }
+
+    public function isAdmin(): bool
+    {
+        return in_array($this->role, ['admin', 'admin_programmer'], true);
+    }
+
+    public function isCashier(): bool
+    {
+        return $this->role === 'cashier';
+    }
+
+    public function canAccessDashboard(): bool
+    {
+        return $this->isAdmin();
+    }
+
+    public function canManageUsers(): bool
+    {
+        return $this->isAdminProgrammer();
+    }
+
+    public function canViewActivityLogs(): bool
+    {
+        return $this->isAdminProgrammer();
+    }
+
+    public function canAccessReports(): bool
+    {
+        return $this->isAdmin();
+    }
+
+    public function canManageCatalog(): bool
+    {
+        return $this->isAdmin();
     }
 
     public function sales()
     {
         return $this->hasMany(Sale::class, 'cashier_id');
+    }
+
+    public function toApiArray(bool $includePasswordPlain = false): array
+    {
+        $data = $this->only([
+            'id',
+            'name',
+            'email',
+            'role',
+            'is_active',
+            'last_login_at',
+            'created_at',
+            'updated_at',
+        ]);
+
+        if ($includePasswordPlain) {
+            $data['password_plain'] = $this->password_plain;
+        }
+
+        return $data;
     }
 }

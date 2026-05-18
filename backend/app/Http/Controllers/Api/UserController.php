@@ -7,8 +7,8 @@ use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Support\ApiPagination;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class UserController extends Controller
 {
@@ -24,41 +24,37 @@ class UserController extends Controller
             $query->where('role', $request->string('role')->toString());
         }
 
-        return response()->json(ApiPagination::format($query->paginate($request->integer('per_page', 15))));
+        $paginator = $query->paginate($request->integer('per_page', 15));
+        $includePasswords = $request->user()->isAdminProgrammer();
+
+        $paginator->getCollection()->transform(
+            fn (User $user) => $user->toApiArray($includePasswords)
+        );
+
+        return response()->json(ApiPagination::format($paginator));
     }
 
     public function store(Request $request, ActivityLogger $logger)
     {
-        $data = $request->validate([
-            'name' => ['required', 'string', 'max:120'],
-            'email' => ['required', 'email', 'max:180', Rule::unique('users')],
-            'password' => ['required', 'string', 'min:8'],
-            'role' => ['required', Rule::in(['admin', 'cashier'])],
-            'is_active' => ['sometimes', 'boolean'],
-        ]);
+        $data = $this->validatedUser($request);
 
         $user = User::create([
             'name' => strip_tags($data['name']),
             'email' => strtolower($data['email']),
-            'password' => Hash::make($data['password']),
+            'password' => $data['password'],
+            'password_plain' => $data['password'],
             'role' => $data['role'],
             'is_active' => $data['is_active'] ?? true,
         ]);
 
         $logger->log('users.created', $user, ['role' => $user->role], $request);
 
-        return response()->json($user, 201);
+        return response()->json($user->toApiArray(true), 201);
     }
 
     public function update(Request $request, User $user, ActivityLogger $logger)
     {
-        $data = $request->validate([
-            'name' => ['sometimes', 'required', 'string', 'max:120'],
-            'email' => ['sometimes', 'required', 'email', 'max:180', Rule::unique('users')->ignore($user)],
-            'password' => ['nullable', 'string', 'min:8'],
-            'role' => ['sometimes', Rule::in(['admin', 'cashier'])],
-            'is_active' => ['sometimes', 'boolean'],
-        ]);
+        $data = $this->validatedUser($request, $user);
 
         if (isset($data['name'])) {
             $data['name'] = strip_tags($data['name']);
@@ -67,7 +63,7 @@ class UserController extends Controller
             $data['email'] = strtolower($data['email']);
         }
         if (! empty($data['password'])) {
-            $data['password'] = Hash::make($data['password']);
+            $data['password_plain'] = $data['password'];
         } else {
             unset($data['password']);
         }
@@ -75,18 +71,46 @@ class UserController extends Controller
         $user->update($data);
         $logger->log('users.updated', $user, [], $request);
 
-        return response()->json($user);
+        return response()->json($user->fresh()->toApiArray(true));
     }
 
     public function destroy(Request $request, User $user, ActivityLogger $logger)
     {
         if ($user->id === $request->user()->id) {
-            return response()->json(['message' => 'You cannot disable yourself.'], 422);
+            return response()->json(['message' => 'Нельзя отключить себя.'], 422);
         }
 
         $user->update(['is_active' => false]);
         $logger->log('users.disabled', $user, [], $request);
 
-        return response()->json(['message' => 'User disabled.', 'user' => $user]);
+        return response()->json(['message' => 'Пользователь отключен.', 'user' => $user->toApiArray(true)]);
+    }
+
+    private function validatedUser(Request $request, ?User $user = null): array
+    {
+        $allowedRoles = ['admin', 'cashier'];
+        if ($request->user()->isAdminProgrammer()) {
+            $allowedRoles[] = 'admin_programmer';
+        }
+
+        $data = $request->validate([
+            'name' => [$user ? 'sometimes' : 'required', 'string', 'max:120'],
+            'email' => [$user ? 'sometimes' : 'required', 'email', 'max:180', Rule::unique('users')->ignore($user)],
+            'password' => [$user ? 'nullable' : 'required', 'string', 'min:8'],
+            'role' => [$user ? 'sometimes' : 'required', Rule::in($allowedRoles)],
+            'is_active' => ['sometimes', 'boolean'],
+        ]);
+
+        if (($data['role'] ?? null) === 'admin_programmer' && ! $request->user()->isAdminProgrammer()) {
+            throw ValidationException::withMessages(['role' => 'Недостаточно прав для этой роли.']);
+        }
+
+        if ($user && $user->isAdminProgrammer() && $request->user()->id !== $user->id) {
+            if (isset($data['role']) && $data['role'] !== 'admin_programmer') {
+                throw ValidationException::withMessages(['role' => 'Нельзя понизить роль администратора программиста.']);
+            }
+        }
+
+        return $data;
     }
 }

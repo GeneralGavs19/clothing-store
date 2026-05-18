@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { canAccessDashboard, canAccessReports, canManageCatalog, canManageUsers, canViewLogs, homeRouteName } from '../utils/permissions'
 import AppShell from '../components/AppShell.vue'
 import LoginView from '../views/LoginView.vue'
 import DashboardView from '../views/DashboardView.vue'
@@ -19,18 +20,28 @@ const router = createRouter({
       component: AppShell,
       meta: { requiresAuth: true },
       children: [
-        { path: '', redirect: '/dashboard' },
-        { path: 'dashboard', name: 'dashboard', component: DashboardView },
+        { path: '', redirect: () => ({ name: homeRouteName(useAuthStore().user) }) },
+        { path: 'dashboard', name: 'dashboard', component: DashboardView, meta: { access: 'dashboard' } },
         { path: 'products', name: 'products', component: ProductsView },
         { path: 'sales', name: 'sales', component: SalesView },
-        { path: 'categories', name: 'categories', component: CategoriesView, meta: { roles: ['admin'] } },
-        { path: 'users', name: 'users', component: UsersView, meta: { roles: ['admin'] } },
-        { path: 'reports', name: 'reports', component: ReportsView, meta: { roles: ['admin'] } },
-        { path: 'logs', name: 'logs', component: LogsView },
+        { path: 'categories', name: 'categories', component: CategoriesView, meta: { access: 'catalog' } },
+        { path: 'users', name: 'users', component: UsersView, meta: { access: 'users' } },
+        { path: 'reports', name: 'reports', component: ReportsView, meta: { access: 'reports' } },
+        { path: 'logs', name: 'logs', component: LogsView, meta: { access: 'logs' } },
       ],
     },
   ],
 })
+
+function canAccessRoute(user, access) {
+  if (!access) return true
+  if (access === 'dashboard') return canAccessDashboard(user)
+  if (access === 'catalog') return canManageCatalog(user)
+  if (access === 'reports') return canAccessReports(user)
+  if (access === 'users') return canManageUsers(user)
+  if (access === 'logs') return canViewLogs(user)
+  return true
+}
 
 router.beforeEach((to) => {
   const auth = useAuthStore()
@@ -40,10 +51,14 @@ router.beforeEach((to) => {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
 
-  if (to.name === 'login' && auth.token) return { name: 'dashboard' }
+  if (to.name === 'login' && auth.token) {
+    return { name: homeRouteName(auth.user) }
+  }
 
-  const roles = to.meta.roles
-  if (roles && !roles.includes(auth.user?.role)) return { name: 'dashboard' }
+  const access = to.meta.access
+  if (access && !canAccessRoute(auth.user, access)) {
+    return { name: homeRouteName(auth.user) }
+  }
 })
 
 export default router

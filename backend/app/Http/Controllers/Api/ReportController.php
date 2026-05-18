@@ -13,39 +13,54 @@ use App\Models\User;
 use App\Services\ActivityLogger;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportController extends Controller
 {
-    public function salesCsv(Request $request)
+    public function salesExcel(Request $request): StreamedResponse
     {
-        $fileName = 'sales-report-'.now()->format('Y-m-d-His').'.csv';
+        $fileName = 'sales-report-'.now()->format('Y-m-d-His').'.xlsx';
 
-        return response()->streamDownload(function () use ($request) {
-            $handle = fopen('php://output', 'w');
-            fputcsv($handle, ['number', 'status', 'cashier', 'subtotal', 'profit', 'submitted_at', 'approved_at']);
+        $spreadsheet = new Spreadsheet;
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Продажи');
 
-            Sale::query()
-                ->with('cashier')
-                ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')->toString()))
-                ->when($request->filled('date_from'), fn ($q) => $q->whereDate('created_at', '>=', $request->date('date_from')))
-                ->when($request->filled('date_to'), fn ($q) => $q->whereDate('created_at', '<=', $request->date('date_to')))
-                ->orderByDesc('created_at')
-                ->chunk(200, function ($sales) use ($handle) {
-                    foreach ($sales as $sale) {
-                        fputcsv($handle, [
-                            $sale->number,
-                            $sale->status,
-                            $sale->cashier?->name,
-                            $sale->subtotal,
-                            $sale->profit,
-                            optional($sale->submitted_at)->toDateTimeString(),
-                            optional($sale->approved_at)->toDateTimeString(),
-                        ]);
-                    }
-                });
+        $headers = ['№ продажи', 'Статус', 'Кассир', 'Выручка, ₸', 'Прибыль, ₸', 'Создана', 'Оформлена'];
+        $sheet->fromArray($headers, null, 'A1');
 
-            fclose($handle);
-        }, $fileName, ['Content-Type' => 'text/csv; charset=UTF-8']);
+        $rowIndex = 2;
+        Sale::query()
+            ->with('cashier')
+            ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')->toString()))
+            ->when($request->filled('date_from'), fn ($q) => $q->whereDate('created_at', '>=', $request->date('date_from')))
+            ->when($request->filled('date_to'), fn ($q) => $q->whereDate('created_at', '<=', $request->date('date_to')))
+            ->orderByDesc('created_at')
+            ->chunk(200, function ($sales) use ($sheet, &$rowIndex) {
+                foreach ($sales as $sale) {
+                    $sheet->fromArray([
+                        $sale->number,
+                        $sale->status,
+                        $sale->cashier?->name,
+                        (float) $sale->subtotal,
+                        (float) $sale->profit,
+                        optional($sale->submitted_at)?->format('d.m.Y H:i'),
+                        optional($sale->approved_at)?->format('d.m.Y H:i'),
+                    ], null, 'A'.$rowIndex);
+                    $rowIndex++;
+                }
+            });
+
+        foreach (range('A', 'G') as $column) {
+            $sheet->getColumnDimension($column)->setAutoSize(true);
+        }
+
+        return response()->streamDownload(function () use ($spreadsheet) {
+            (new Xlsx($spreadsheet))->save('php://output');
+        }, $fileName, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
     }
 
     public function backup(Request $request, ActivityLogger $logger)

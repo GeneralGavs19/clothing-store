@@ -57,6 +57,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { icons } from '../plugins/icons'
 import { apiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { homeRouteName } from '../utils/permissions'
 import { useToastStore } from '../stores/toasts'
 
 // Функция для создания Vue компонента из SVG строки
@@ -85,7 +86,8 @@ async function submit() {
   try {
     await auth.login(form)
     toast.push('Добро пожаловать')
-    router.push(route.query.redirect || '/dashboard')
+    const fallback = `/${homeRouteName(auth.user)}`
+    router.push(route.query.redirect || fallback)
   } catch (error) {
     toast.push(apiError(error), 'error')
   }

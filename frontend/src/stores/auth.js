@@ -1,11 +1,25 @@
 import { defineStore } from 'pinia'
+import {
+  canAccessDashboard,
+  canAccessReports,
+  canManageCatalog,
+  canManageUsers,
+  canViewLogs,
+} from '../utils/permissions'
 import api from '../api/client'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({ user: null, token: null, loading: false }),
   getters: {
-    isAdmin: (state) => state.user?.role === 'admin',
+    isAdminProgrammer: (state) => state.user?.role === 'admin_programmer',
+    isStoreAdmin: (state) => state.user?.role === 'admin',
+    isAdmin: (state) => state.user?.role === 'admin' || state.user?.role === 'admin_programmer',
     isCashier: (state) => state.user?.role === 'cashier',
+    canAccessDashboard: (state) => canAccessDashboard(state.user),
+    canManageCatalog: (state) => canManageCatalog(state.user),
+    canAccessReports: (state) => canAccessReports(state.user),
+    canManageUsers: (state) => canManageUsers(state.user),
+    canViewLogs: (state) => canViewLogs(state.user),
   },
   actions: {
     restore() {

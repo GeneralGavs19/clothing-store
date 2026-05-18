@@ -91,6 +91,7 @@ import { apiError } from '../api/client'
 import { useLogsStore } from '../stores/logs'
 import { useToastStore } from '../stores/toasts'
 import { actionLabel, formatMoney } from '../utils/logLabels'
+import { roleLabel as roleLabelText } from '../utils/permissions'
 import EmptyState from '../components/ui/EmptyState.vue'
 import PaginationBar from '../components/ui/PaginationBar.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
@@ -132,7 +133,7 @@ function date(value) {
 }
 
 function roleLabel(role) {
-  return { admin: 'Администратор', cashier: 'Кассир' }[role] || role
+  return roleLabelText(role)
 }
 
 function formatMeta(meta) {

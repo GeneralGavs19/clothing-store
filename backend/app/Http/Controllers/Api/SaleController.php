@@ -15,7 +15,7 @@ class SaleController extends Controller
     {
         $query = Sale::query()->with(['items.product.category', 'cashier', 'approver'])->latest();
 
-        if (! $request->user()->isAdmin()) {
+        if ($request->user()->isCashier()) {
             $query->where('cashier_id', $request->user()->id);
         }
 

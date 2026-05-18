@@ -7,11 +7,17 @@
         </div>
         <div>
           <div class="font-semibold leading-tight">Durability Store</div>
-          <div class="text-xs text-slate-500 dark:text-slate-400">{{ roleLabel }}</div>
+          <div class="text-xs text-slate-500 dark:text-slate-400">{{ roleLabelText }}</div>
         </div>
       </div>
       <nav class="mt-8 space-y-1">
-        <RouterLink v-for="item in visibleNav" :key="item.to" :to="item.to" class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white" active-class="bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+        <RouterLink
+          v-for="item in visibleNav"
+          :key="item.to"
+          :to="item.to"
+          class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
+          active-class="bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+        >
           <component :is="item.icon" class="h-4 w-4" />
           {{ item.label }}
         </RouterLink>
@@ -52,7 +58,14 @@
           <button class="btn-icon" title="Закрыть" @click="mobileOpen = false"><X class="h-4 w-4" /></button>
         </div>
         <nav class="space-y-1">
-          <RouterLink v-for="item in visibleNav" :key="item.to" :to="item.to" class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200" active-class="bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" @click="mobileOpen = false">
+          <RouterLink
+            v-for="item in visibleNav"
+            :key="item.to"
+            :to="item.to"
+            class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200"
+            active-class="bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+            @click="mobileOpen = false"
+          >
             <component :is="item.icon" class="h-4 w-4" />
             {{ item.label }}
           </RouterLink>
@@ -66,6 +79,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { roleLabel } from '../utils/permissions'
 import { createIcon, icons } from '../plugins/icons'
 
 const ChartNoAxesCombined = createIcon(icons.LayoutDashboard)
@@ -88,17 +102,17 @@ const mobileOpen = ref(false)
 const dark = ref(localStorage.getItem('theme') === 'dark')
 
 const nav = [
-  { to: '/dashboard', label: 'Обзор', icon: ChartNoAxesCombined },
-  { to: '/products', label: 'Товары', icon: PackageSearch },
-  { to: '/sales', label: 'Продажи', icon: ClipboardList },
-  { to: '/categories', label: 'Категории', icon: Folders, admin: true },
-  { to: '/users', label: 'Пользователи', icon: Users, admin: true },
-  { to: '/reports', label: 'Отчеты', icon: ScrollText, admin: true },
-  { to: '/logs', label: 'Журнал', icon: Boxes },
+  { to: '/dashboard', label: 'Обзор', icon: ChartNoAxesCombined, show: () => auth.canAccessDashboard },
+  { to: '/products', label: 'Товары', icon: PackageSearch, show: () => true },
+  { to: '/sales', label: 'Продажи', icon: ClipboardList, show: () => true },
+  { to: '/categories', label: 'Категории', icon: Folders, show: () => auth.canManageCatalog },
+  { to: '/reports', label: 'Отчеты', icon: ScrollText, show: () => auth.canAccessReports },
+  { to: '/users', label: 'Пользователи', icon: Users, show: () => auth.canManageUsers },
+  { to: '/logs', label: 'Журнал', icon: Boxes, show: () => auth.canViewLogs },
 ]
 
-const visibleNav = computed(() => nav.filter((item) => !item.admin || auth.isAdmin))
-const roleLabel = computed(() => (auth.isAdmin ? 'Администратор' : 'Кассир'))
+const visibleNav = computed(() => nav.filter((item) => item.show()))
+const roleLabelText = computed(() => roleLabel(auth.user?.role))
 const routeTitle = computed(() => visibleNav.value.find((item) => route.path.startsWith(item.to))?.label || 'Система')
 
 function applyTheme() {
