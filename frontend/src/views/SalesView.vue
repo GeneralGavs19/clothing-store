@@ -1,6 +1,6 @@
 ﻿<template>
   <div class="space-y-5">
-    <section class="grid gap-5 xl:grid-cols-[1fr_1.1fr]">
+    <section class="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_1.1fr]">
       <!-- Выбор товаров -->
       <div class="panel p-4">
         <div class="mb-4 flex items-center justify-between gap-3">
@@ -34,7 +34,7 @@
             <div class="min-w-0 flex-1">
               <div class="truncate text-sm font-medium">{{ product.name }}</div>
               <div class="text-xs text-slate-500">
-                код {{ product.sku }} · склад {{ product.stock_quantity }} · витрина {{ product.display_quantity }}
+                код {{ product.sku }}<span v-if="product.size"> · {{ product.size }}</span> · склад {{ product.stock_quantity }} · витрина {{ product.display_quantity }}
               </div>
             </div>
             <div class="text-sm font-semibold">{{ money(product.sale_price) }}</div>
@@ -93,13 +93,13 @@
             <textarea v-model="cashierNote" class="textarea" rows="2" placeholder="Необязательно" />
           </label>
 
-          <div class="flex items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
+          <div class="flex flex-col gap-3 border-t border-slate-200 pt-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div class="text-sm text-slate-500">Сумма продажи</div>
               <div class="text-xl font-semibold">{{ money(cartTotal) }}</div>
               <div class="text-xs text-slate-500">{{ cartItemsCount }} шт. · {{ cart.length }} поз.</div>
             </div>
-            <button type="submit" class="btn-primary" :disabled="saving">
+            <button type="submit" class="btn-primary w-full sm:w-auto" :disabled="saving">
               <LoaderCircle v-if="saving" class="h-4 w-4 animate-spin" />
               Создать продажу
             </button>
@@ -124,7 +124,7 @@
 
       <EmptyState v-if="!sales.loading && !sales.sales.length" class="m-4" title="Продаж пока нет" text="Создайте первую продажу выше." />
       <div v-else class="divide-y divide-slate-200 dark:divide-slate-800">
-        <div v-for="sale in sales.sales" :key="sale.id" class="grid gap-3 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
+        <div v-for="sale in sales.sales" :key="sale.id" class="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div class="font-medium text-slate-900 dark:text-white">{{ saleTitle(sale) }}</div>
             <p class="mt-1 text-sm text-slate-500">
@@ -144,13 +144,12 @@
               </div>
             </div>
           </div>
-          <div class="text-right">
+          <div class="flex flex-col gap-2 sm:items-end sm:text-right">
             <div class="text-lg font-semibold">{{ money(sale.subtotal) }}</div>
-            <div class="text-xs text-slate-500">прибыль {{ money(sale.profit) }}</div>
             <button
               v-if="auth.isAdmin"
               type="button"
-              class="btn-danger mt-2 h-8 px-3"
+              class="btn-danger h-9 w-full px-3 sm:w-auto"
               @click="confirmDeleteSale(sale)"
             >
               Удалить

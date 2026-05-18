@@ -38,7 +38,7 @@ const props = defineProps({
   },
   columnWidth: {
     type: Number,
-    default: 56,
+    default: 44,
   },
 })
 

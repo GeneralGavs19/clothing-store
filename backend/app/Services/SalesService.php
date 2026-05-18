@@ -42,7 +42,7 @@ class SalesService
                 $product = $products->get((int) $item['product_id']);
                 $quantity = (int) $item['quantity'];
                 $source = ($item['source'] ?? 'display') === 'stock' ? 'stock' : 'display';
-                $purchase = (float) $product->purchase_price;
+                $purchase = 0;
                 $salePrice = (float) $product->sale_price;
                 $lineTotal = round($salePrice * $quantity, 2);
                 $lineProfit = round(($salePrice - $purchase) * $quantity, 2);

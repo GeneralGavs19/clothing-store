@@ -1,9 +1,9 @@
 ﻿<template>
   <div class="space-y-5">
     <section class="panel p-4">
-      <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <input v-model="filters.search" class="input" placeholder="Поиск по названию или коду" @input="debouncedFetch" />
+      <div class="flex flex-col gap-3">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <input v-model="filters.search" class="input" placeholder="Поиск по названию, коду или размеру" @input="debouncedFetch" />
           <select v-model="filters.category_id" class="select" @change="fetchProducts(1)">
             <option value="">Все категории</option>
             <option v-for="category in catalog.categories" :key="category.id" :value="category.id">{{ category.name }}</option>
@@ -22,7 +22,7 @@
             <option value="display_quantity">По витрине</option>
           </select>
         </div>
-        <button v-if="auth.isAdmin" class="btn-primary" @click="openCreate">
+        <button v-if="auth.isAdmin" class="btn-primary w-full sm:ml-auto sm:w-auto" @click="openCreate">
           <Plus class="h-4 w-4" />Товар
         </button>
       </div>
@@ -33,60 +33,70 @@
         <SkeletonBlock v-for="i in 6" :key="i" custom-class="h-44" />
       </div>
       <EmptyState v-else-if="!catalog.products.length" class="m-4" title="Товары не найдены" text="Измените фильтры или добавьте первый товар." />
-      <div v-else class="p-2">
-        <div class="divide-y divide-slate-200 dark:divide-slate-800">
-          <div v-for="product in catalog.products" :key="product.id" class="flex items-center justify-between p-3 hover:bg-slate-50 dark:hover:bg-slate-900">
-            <div class="flex min-w-0 flex-1 items-center gap-3">
-              <button type="button" class="h-12 w-12 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800" @click="detail = product">
-                <img v-if="product.photo_url" :src="photoUrl(product.photo_url)" class="h-full w-full object-cover" :alt="product.name" loading="lazy" />
-                <div v-else class="flex h-full w-full items-center justify-center">
-                  <Package class="h-5 w-5 text-slate-400" />
-                </div>
-              </button>
-              <button type="button" class="min-w-0 text-left" @click="detail = product">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="truncate font-medium">{{ product.name }}</span>
-                  <span class="badge shrink-0" :class="statusClass(product.status)">{{ statusLabel(product.status) }}</span>
-                </div>
-                <div class="text-xs text-slate-500">
-                  код {{ product.sku }} · {{ product.category?.name || 'Без категории' }}
-                </div>
-              </button>
+      <div v-else class="divide-y divide-slate-200 dark:divide-slate-800">
+        <article v-for="product in catalog.products" :key="product.id" class="product-row">
+          <div class="flex min-w-0 flex-1 items-start gap-3">
+            <button
+              type="button"
+              class="h-14 w-14 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800"
+              @click="detail = product"
+            >
+              <img v-if="product.photo_url" :src="photoUrl(product.photo_url)" class="h-full w-full object-cover" :alt="product.name" loading="lazy" />
+              <div v-else class="flex h-full w-full items-center justify-center">
+                <Package class="h-5 w-5 text-slate-400" />
+              </div>
+            </button>
+            <button type="button" class="min-w-0 flex-1 text-left" @click="detail = product">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-medium leading-snug">{{ product.name }}</span>
+                <span class="badge shrink-0" :class="statusClass(product.status)">{{ statusLabel(product.status) }}</span>
+              </div>
+              <p class="mt-1 text-xs leading-relaxed text-slate-500">
+                код {{ product.sku }}
+                <span v-if="product.size"> · размер {{ product.size }}</span>
+                · {{ product.category?.name || 'Без категории' }}
+              </p>
+            </button>
+          </div>
+          <div class="product-row__aside">
+            <div class="min-w-0">
+              <div class="text-base font-semibold tabular-nums">{{ money(product.sale_price) }}</div>
+              <div class="text-xs text-slate-500">витр. {{ product.display_quantity }} · склад {{ product.stock_quantity }}</div>
             </div>
-            <div class="flex items-center gap-3">
-              <div class="text-sm font-semibold">{{ money(product.sale_price) }}</div>
-              <div class="text-xs text-slate-500" title="Витрина / склад">
-                витр. {{ product.display_quantity }} · склад {{ product.stock_quantity }}
-              </div>
-              <div class="flex items-center gap-2">
-                <button
-                  v-if="auth.isAdmin && product.stock_quantity > 0"
-                  type="button"
-                  class="btn-icon"
-                  title="На витрину (1 шт.)"
-                  @click="moveToDisplay(product)"
-                >
-                  <ArrowRightLeft class="h-4 w-4" />
-                </button>
-                <button type="button" class="btn-icon" title="Карточка" @click="detail = product">
-                  <Eye class="h-4 w-4" />
-                </button>
-                <button v-if="auth.isAdmin" type="button" class="btn-icon" title="Редактировать" @click="openEdit(product)">
-                  <Pencil class="h-4 w-4" />
-                </button>
-                <button v-if="auth.isAdmin" type="button" class="btn-icon !border-rose-200 !text-rose-600" title="Удалить" @click="confirmDelete(product)">
-                  <X class="h-4 w-4" />
-                </button>
-              </div>
+            <div class="flex shrink-0 items-center gap-1.5">
+              <button
+                v-if="auth.isAdmin && product.stock_quantity > 0"
+                type="button"
+                class="btn-icon"
+                title="На витрину (1 шт.)"
+                @click="moveToDisplay(product)"
+              >
+                <ArrowRightLeft class="h-4 w-4" />
+              </button>
+              <button type="button" class="btn-icon" title="Карточка" @click="detail = product">
+                <Eye class="h-4 w-4" />
+              </button>
+              <button v-if="auth.isAdmin" type="button" class="btn-icon" title="Редактировать" @click="openEdit(product)">
+                <Pencil class="h-4 w-4" />
+              </button>
+              <button
+                v-if="auth.isAdmin"
+                type="button"
+                class="btn-icon !border-rose-200 !text-rose-600"
+                title="Удалить"
+                @click="confirmDelete(product)"
+              >
+                <X class="h-4 w-4" />
+              </button>
             </div>
           </div>
-        </div>
+        </article>
       </div>
       <PaginationBar :meta="catalog.productMeta" @page="fetchProducts" />
     </section>
 
     <ModalPanel :open="editorOpen" :title="editing?.id ? 'Редактировать товар' : 'Новый товар'" @close="editorOpen = false">
-      <form class="grid gap-4 sm:grid-cols-2" @submit.prevent="saveProduct">
+      <form class="grid grid-cols-1 gap-4 sm:grid-cols-2" @submit.prevent="saveProduct">
         <label class="block sm:col-span-2">
           <span class="mb-1 block text-sm font-medium">Название</span>
           <input v-model="form.name" class="input" required />
@@ -96,17 +106,17 @@
           <input v-model="form.sku" class="input" required placeholder="Например: SAM-GAL-001" />
         </label>
         <label class="block">
+          <span class="mb-1 block text-sm font-medium">Размер</span>
+          <input v-model="form.size" class="input" placeholder="Например: M, 42, 10–12 лет" />
+        </label>
+        <label class="block sm:col-span-2">
           <span class="mb-1 block text-sm font-medium">Категория</span>
           <select v-model="form.category_id" class="select">
             <option value="">Без категории</option>
             <option v-for="category in catalog.categories" :key="category.id" :value="category.id">{{ category.name }}</option>
           </select>
         </label>
-        <label class="block">
-          <span class="mb-1 block text-sm font-medium">Цена закупки</span>
-          <input v-model.number="form.purchase_price" class="input" type="number" min="0" step="0.01" required />
-        </label>
-        <label class="block">
+        <label class="block sm:col-span-2">
           <span class="mb-1 block text-sm font-medium">Цена продажи</span>
           <input v-model.number="form.sale_price" class="input" type="number" min="0" step="0.01" required />
         </label>
@@ -118,12 +128,12 @@
           <span class="mb-1 block text-sm font-medium">На витрине</span>
           <input v-model.number="form.display_quantity" class="input" type="number" min="0" required />
         </label>
-        <label class="block">
+        <label class="block sm:col-span-2">
           <span class="mb-1 block text-sm font-medium">Порог остатка</span>
           <p class="mb-1 text-xs text-slate-500">Если сумма склада и витрины ≤ порога — товар в «Низкий остаток»</p>
           <input v-model.number="form.low_stock_threshold" class="input" type="number" min="0" />
         </label>
-        <label class="block">
+        <label class="block sm:col-span-2">
           <span class="mb-1 block text-sm font-medium">Фото</span>
           <input class="input py-2" type="file" accept="image/*" @change="form.photo = $event.target.files[0]" />
         </label>
@@ -131,9 +141,9 @@
           <span class="mb-1 block text-sm font-medium">Описание</span>
           <textarea v-model="form.description" class="textarea" />
         </label>
-        <div class="flex justify-end gap-2 sm:col-span-2">
-          <button type="button" class="btn-muted" @click="editorOpen = false">Отмена</button>
-          <button class="btn-primary" :disabled="saving">
+        <div class="flex flex-col-reverse gap-2 sm:col-span-2 sm:flex-row sm:justify-end">
+          <button type="button" class="btn-muted w-full sm:w-auto" @click="editorOpen = false">Отмена</button>
+          <button class="btn-primary w-full sm:w-auto" :disabled="saving">
             <LoaderCircle v-if="saving" class="h-4 w-4 animate-spin" />Сохранить
           </button>
         </div>
@@ -142,20 +152,20 @@
 
     <ModalPanel :open="!!detail" title="Карточка товара" @close="detail = null">
       <div v-if="detail" class="space-y-4">
-        <div class="flex gap-4">
-          <div class="h-24 w-24 overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-900">
+        <div class="flex flex-col gap-4 sm:flex-row">
+          <div class="mx-auto h-24 w-24 shrink-0 overflow-hidden rounded-lg bg-slate-100 sm:mx-0 dark:bg-slate-900">
             <img v-if="detail.photo_url" :src="photoUrl(detail.photo_url)" class="h-full w-full object-cover" alt="" />
             <Package v-else class="m-8 h-8 w-8 text-slate-400" />
           </div>
-          <div>
+          <div class="min-w-0 text-center sm:text-left">
             <h2 class="text-xl font-semibold">{{ detail.name }}</h2>
             <p class="text-sm text-slate-500">Код: {{ detail.sku }}</p>
+            <p v-if="detail.size" class="text-sm text-slate-500">Размер: {{ detail.size }}</p>
             <p class="mt-2 text-sm">{{ detail.category?.name || 'Без категории' }}</p>
           </div>
         </div>
-        <div class="grid gap-3 sm:grid-cols-2">
-          <Info label="Закупка" :value="money(detail.purchase_price)" />
-          <Info label="Продажа" :value="money(detail.sale_price)" />
+        <div class="grid grid-cols-2 gap-3">
+          <Info label="Цена" :value="money(detail.sale_price)" />
           <Info label="Склад" :value="detail.stock_quantity" />
           <Info label="Витрина" :value="detail.display_quantity" />
           <Info label="Общий остаток" :value="detail.total_quantity" />
@@ -200,7 +210,18 @@ let debounce
 const apiBase = computed(() => resolveApiOrigin())
 
 function emptyForm() {
-  return { name: '', sku: '', category_id: '', description: '', purchase_price: 0, sale_price: 0, stock_quantity: 0, display_quantity: 0, low_stock_threshold: 5, photo: null }
+  return {
+    name: '',
+    sku: '',
+    size: '',
+    category_id: '',
+    description: '',
+    sale_price: 0,
+    stock_quantity: 0,
+    display_quantity: 0,
+    low_stock_threshold: 5,
+    photo: null,
+  }
 }
 
 function resetForm(product = null) {

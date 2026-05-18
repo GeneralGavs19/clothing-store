@@ -14,11 +14,23 @@
   color-scheme: dark;
 }
 
+html {
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
   background: #f6f7f9;
+}
+
+#app {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .dark body {
@@ -91,5 +103,13 @@ body {
 
   .card-actions {
     @apply flex items-center gap-2;
+  }
+
+  .product-row {
+    @apply flex flex-col gap-3 p-3 hover:bg-slate-50 dark:hover:bg-slate-900 sm:flex-row sm:items-center sm:justify-between;
+  }
+
+  .product-row__aside {
+    @apply flex w-full items-center justify-between gap-3 border-t border-slate-100 pt-3 dark:border-slate-800 sm:w-auto sm:border-0 sm:pt-0;
   }
 }

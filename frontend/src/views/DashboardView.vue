@@ -73,7 +73,7 @@
       </div>
     </section>
 
-    <div class="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
+    <div class="grid grid-cols-1 gap-5 xl:grid-cols-[1.35fr_0.65fr]">
       <section class="panel p-4">
         <div class="mb-4 flex items-center justify-between gap-3">
           <div>
@@ -88,7 +88,7 @@
         <div v-if="!salesByDay.length" class="h-64">
           <EmptyState title="Продаж пока нет" text="После оформления продаж график заполнится автоматически." />
         </div>
-        <div v-else class="rounded-md bg-slate-50 p-3 dark:bg-slate-900">
+        <div v-else class="overflow-x-auto rounded-md bg-slate-50 p-3 dark:bg-slate-900">
           <SalesDayChart :days="salesByDay" />
         </div>
       </section>

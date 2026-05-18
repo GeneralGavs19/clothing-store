@@ -18,7 +18,7 @@
       </nav>
     </aside>
 
-    <div class="lg:pl-64">
+    <div class="w-full min-w-0 lg:pl-64">
       <header class="sticky top-0 z-20 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
         <div class="flex items-center justify-between gap-3">
           <button class="btn-icon h-10 w-10 lg:hidden" title="Меню" @click="mobileOpen = true">
@@ -40,7 +40,7 @@
         </div>
       </header>
 
-      <main class="px-4 py-5 sm:px-6 lg:px-8">
+      <main class="w-full max-w-full overflow-x-hidden px-4 py-5 sm:px-6 lg:px-8">
         <RouterView />
       </main>
     </div>

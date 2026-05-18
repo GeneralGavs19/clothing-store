@@ -12,7 +12,7 @@
     <div class="flex items-start justify-between gap-3">
       <div class="min-w-0 flex-1">
         <p class="text-sm text-slate-500 dark:text-slate-400">{{ title }}</p>
-        <p class="mt-1 text-2xl font-semibold leading-tight">{{ value }}</p>
+        <p class="mt-1 text-xl font-semibold leading-tight sm:text-2xl">{{ value }}</p>
         <p v-if="hint" class="mt-1.5 text-xs leading-snug text-slate-500 dark:text-slate-400">{{ hint }}</p>
         <p v-if="to" class="mt-2 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">Подробнее →</p>
       </div>
