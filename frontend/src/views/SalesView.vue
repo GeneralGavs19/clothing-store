@@ -148,7 +148,7 @@
             <div class="text-lg font-semibold">{{ money(sale.subtotal) }}</div>
             <div class="text-xs text-slate-500">прибыль {{ money(sale.profit) }}</div>
             <button
-              v-if="auth.isAdmin && sale.status !== 'approved'"
+              v-if="auth.isAdmin"
               type="button"
               class="btn-danger mt-2 h-8 px-3"
               @click="confirmDeleteSale(sale)"
@@ -295,10 +295,14 @@ function date(value) {
 }
 
 async function confirmDeleteSale(sale) {
-  if (!confirm(`Удалить ${saleTitle(sale)}?`)) return
+  const restoreNote =
+    sale.status === 'approved'
+      ? '\n\nОстатки вернутся на склад или витрину. Запись исчезнет из списка продаж.'
+      : ''
+  if (!confirm(`Удалить ${saleTitle(sale)}?${restoreNote}`)) return
   try {
-    await sales.deleteSale(sale.id)
-    toast.push('Продажа удалена')
+    const { data } = await sales.deleteSale(sale.id)
+    toast.push(data?.message || 'Продажа удалена')
     await refreshAll()
   } catch (error) {
     toast.push(apiError(error), 'error')

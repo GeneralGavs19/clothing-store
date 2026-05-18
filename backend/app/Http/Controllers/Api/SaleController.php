@@ -88,18 +88,37 @@ class SaleController extends Controller
         return response()->json($sale);
     }
 
-    public function destroy(Request $request, Sale $sale, ActivityLogger $logger)
+    public function destroy(Request $request, Sale $sale, SalesService $sales, ActivityLogger $logger)
     {
-        if ($sale->status === 'approved') {
-            return response()->json(['message' => 'Approved sales cannot be deleted.'], 422);
-        }
+        $sale->load(['items', 'cashier']);
 
-        // remove items and delete sale
-        $sale->items()->delete();
+        $meta = [
+            'sale_id' => $sale->id,
+            'number' => $sale->number,
+            'display_title' => $sale->display_title,
+            'status' => $sale->status,
+            'subtotal' => (float) $sale->subtotal,
+            'profit' => (float) $sale->profit,
+            'cashier' => $sale->cashier?->only(['id', 'name']),
+            'items' => $sale->items->map(fn ($item) => [
+                'product_id' => $item->product_id,
+                'name' => $item->product_name ?: $item->product?->name,
+                'sku' => $item->product_sku,
+                'quantity' => (int) $item->quantity,
+                'source_location' => $item->source_location,
+                'line_total' => (float) $item->line_total,
+            ])->values()->all(),
+            'deleted_by' => $request->user()->only(['id', 'name', 'email', 'role']),
+        ];
 
-        $logger->log('sales.deleted', $sale, ['number' => $sale->number], $request);
-        $sale->delete();
+        $sales->deleteSale($sale, $request->user());
 
-        return response()->json(['message' => 'Sale deleted.']);
+        $logger->log('sales.deleted', null, $meta, $request);
+
+        $message = $sale->status === 'approved'
+            ? 'Продажа удалена. Остатки товаров возвращены.'
+            : 'Продажа удалена.';
+
+        return response()->json(['message' => $message]);
     }
 }

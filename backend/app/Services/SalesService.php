@@ -180,6 +180,66 @@ class SalesService
         });
     }
 
+    public function deleteSale(Sale $sale, User $admin): void
+    {
+        DB::transaction(function () use ($sale, $admin) {
+            $sale = Sale::query()->with('items')->lockForUpdate()->findOrFail($sale->id);
+
+            if ($sale->status === 'approved') {
+                $productIds = $sale->items->pluck('product_id')->filter()->unique()->values();
+
+                if ($productIds->isNotEmpty()) {
+                    $products = Product::query()
+                        ->whereIn('id', $productIds)
+                        ->lockForUpdate()
+                        ->get()
+                        ->keyBy('id');
+
+                    foreach ($sale->items as $item) {
+                        if (! $item->product_id) {
+                            continue;
+                        }
+
+                        $product = $products->get($item->product_id);
+
+                        if (! $product) {
+                            continue;
+                        }
+
+                        $source = $item->source_location ?? 'display';
+
+                        if ($source === 'stock') {
+                            $product->stock_quantity += (int) $item->quantity;
+                        } else {
+                            $product->display_quantity += (int) $item->quantity;
+                        }
+
+                        $product->refreshStatus();
+                        $product->save();
+
+                        StockMovement::create([
+                            'product_id' => $product->id,
+                            'sale_id' => null,
+                            'user_id' => $admin->id,
+                            'type' => 'adjustment',
+                            'from_location' => 'external',
+                            'to_location' => $source,
+                            'quantity' => (int) $item->quantity,
+                            'stock_after' => $product->stock_quantity,
+                            'display_after' => $product->display_quantity,
+                            'note' => 'Отмена продажи №'.$sale->id,
+                        ]);
+                    }
+                }
+
+                $this->reverseDailyStats($sale);
+            }
+
+            StockMovement::query()->where('sale_id', $sale->id)->delete();
+            $sale->delete();
+        });
+    }
+
     public function reject(Sale $sale, User $admin, ?string $note = null): Sale
     {
         return DB::transaction(function () use ($sale, $admin, $note) {
@@ -232,6 +292,34 @@ class SalesService
                     'profit' => $sale->profit,
                     'items_sold' => $itemsSold,
                 ]);
+            }
+
+            Cache::forget('daily_stats_last_14');
+        } catch (\Throwable) {
+            //
+        }
+    }
+
+    private function reverseDailyStats(Sale $sale): void
+    {
+        try {
+            $date = ($sale->approved_at ?? $sale->created_at)->toDateString();
+            $itemsSold = (int) $sale->items->sum('quantity');
+            $stat = DailyStat::query()->where('date', $date)->first();
+
+            if (! $stat) {
+                return;
+            }
+
+            $stat->total_sales = max(0, (int) $stat->total_sales - 1);
+            $stat->revenue = max(0, (float) $stat->revenue - (float) $sale->subtotal);
+            $stat->profit = max(0, (float) $stat->profit - (float) $sale->profit);
+            $stat->items_sold = max(0, (int) $stat->items_sold - $itemsSold);
+
+            if ($stat->total_sales === 0 && (float) $stat->revenue <= 0 && (int) $stat->items_sold === 0) {
+                $stat->delete();
+            } else {
+                $stat->save();
             }
 
             Cache::forget('daily_stats_last_14');
