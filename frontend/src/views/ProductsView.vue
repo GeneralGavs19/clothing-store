@@ -126,14 +126,16 @@
             <button type="button" class="btn-muted h-8 px-3" @click="addVariantRow">+ Добавить размер</button>
           </div>
           <div class="space-y-2 rounded-md border border-slate-200 p-3 dark:border-slate-800">
-            <div class="grid grid-cols-[1fr_1fr_auto] gap-2 text-xs text-slate-500">
+            <div class="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 text-xs text-slate-500">
               <span>Размер</span>
-              <span>Количество</span>
+              <span>На складе</span>
+              <span>В магазине</span>
               <span />
             </div>
-            <div v-for="(variant, index) in form.variants" :key="`variant-${index}`" class="grid grid-cols-[1fr_1fr_auto] gap-2">
+            <div v-for="(variant, index) in form.variants" :key="`variant-${index}`" class="grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
               <input v-model="variant.size" class="input" placeholder="Например: 98, 100, XL" />
-              <input v-model.number="variant.quantity" class="input" type="number" min="0" />
+              <input v-model.number="variant.stock_quantity" class="input" type="number" min="0" />
+              <input v-model.number="variant.display_quantity" class="input" type="number" min="0" />
               <button type="button" class="btn-muted h-10 px-3" :disabled="form.variants.length === 1" @click="removeVariantRow(index)">
                 ×
               </button>
@@ -141,8 +143,8 @@
           </div>
         </div>
         <label class="block">
-          <span class="mb-1 block text-sm font-medium">В магазине</span>
-          <input v-model.number="form.display_quantity" class="input" type="number" min="0" required />
+          <span class="mb-1 block text-sm font-medium">В магазине (авто)</span>
+          <input :value="displayFromVariants" class="input bg-slate-50 dark:bg-slate-900" type="number" disabled />
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium">На складе (авто)</span>
@@ -189,11 +191,11 @@
           <div class="overflow-hidden rounded-md border border-slate-200 dark:border-slate-800">
             <div class="grid grid-cols-2 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-900">
               <span>Размер</span>
-              <span>Количество</span>
+              <span>Склад / Магазин</span>
             </div>
             <div v-for="(variant, index) in detail.variants" :key="`detail-variant-${index}`" class="grid grid-cols-2 px-3 py-2 text-sm">
               <span>{{ variant.size }}</span>
-              <span>{{ variant.quantity }}</span>
+              <span>{{ variant.stock_quantity ?? variant.quantity ?? 0 }} / {{ variant.display_quantity ?? 0 }}</span>
             </div>
           </div>
         </div>
@@ -276,7 +278,7 @@ function emptyForm() {
     name: '',
     sku: '',
     size: '',
-    variants: [{ size: '', quantity: 0 }],
+    variants: [{ size: '', stock_quantity: 0, display_quantity: 0 }],
     category_id: '',
     description: '',
     sale_price: 0,
@@ -331,7 +333,12 @@ async function saveProduct() {
   try {
     const variants = normalizeVariants(form.variants)
     if (!variants.length) throw new Error('Добавьте хотя бы один размер.')
-    const payload = { ...form, variants, stock_quantity: stockFromVariantList(variants) }
+    const payload = {
+      ...form,
+      variants,
+      stock_quantity: stockFromVariantList(variants),
+      display_quantity: displayFromVariantList(variants),
+    }
     await catalog.saveProduct(payload, editing.value?.id)
     toast.push('Товар сохранен')
     editorOpen.value = false
@@ -380,26 +387,35 @@ async function importProducts() {
 }
 
 const stockFromVariants = computed(() => stockFromVariantList(form.variants))
+const displayFromVariants = computed(() => displayFromVariantList(form.variants))
 
 function normalizeVariants(rawVariants, fallbackSize = '', fallbackQty = 0) {
   if (Array.isArray(rawVariants)) {
     const prepared = rawVariants
-      .map((variant) => ({ size: String(variant?.size || '').trim(), quantity: Math.max(0, Number(variant?.quantity || 0)) }))
+      .map((variant) => ({
+        size: String(variant?.size || '').trim(),
+        stock_quantity: Math.max(0, Number(variant?.stock_quantity ?? variant?.quantity ?? 0)),
+        display_quantity: Math.max(0, Number(variant?.display_quantity || 0)),
+      }))
       .filter((variant) => variant.size)
     if (prepared.length) return prepared
   }
   if (String(fallbackSize || '').trim()) {
-    return [{ size: String(fallbackSize).trim(), quantity: Math.max(0, Number(fallbackQty || 0)) }]
+    return [{ size: String(fallbackSize).trim(), stock_quantity: Math.max(0, Number(fallbackQty || 0)), display_quantity: 0 }]
   }
-  return [{ size: '', quantity: 0 }]
+  return [{ size: '', stock_quantity: 0, display_quantity: 0 }]
 }
 
 function stockFromVariantList(list) {
-  return (list || []).reduce((sum, variant) => sum + Math.max(0, Number(variant?.quantity || 0)), 0)
+  return (list || []).reduce((sum, variant) => sum + Math.max(0, Number(variant?.stock_quantity ?? variant?.quantity ?? 0)), 0)
+}
+
+function displayFromVariantList(list) {
+  return (list || []).reduce((sum, variant) => sum + Math.max(0, Number(variant?.display_quantity || 0)), 0)
 }
 
 function addVariantRow() {
-  form.variants.push({ size: '', quantity: 0 })
+  form.variants.push({ size: '', stock_quantity: 0, display_quantity: 0 })
 }
 
 function removeVariantRow(index) {

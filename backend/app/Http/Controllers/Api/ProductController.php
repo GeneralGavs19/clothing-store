@@ -182,7 +182,11 @@ class ProductController extends Controller
                     'name' => $name,
                     'sku' => $sku !== '' ? $sku : null,
                     'size' => $size !== '' ? $size : null,
-                    'variants' => $size !== '' ? [['size' => $size, 'quantity' => $stockQty]] : null,
+                    'variants' => $size !== '' ? [[
+                        'size' => $size,
+                        'stock_quantity' => $stockQty,
+                        'display_quantity' => $displayQty,
+                    ]] : null,
                     'description' => $description !== '' ? $description : null,
                     'sale_price' => $salePrice,
                     'stock_quantity' => $stockQty,
@@ -214,7 +218,9 @@ class ProductController extends Controller
             'size' => ['nullable', 'string', 'max:32'],
             'variants' => ['nullable', 'array', 'min:1'],
             'variants.*.size' => ['required_with:variants', 'string', 'max:32'],
-            'variants.*.quantity' => ['required_with:variants', 'integer', 'min:0'],
+            'variants.*.quantity' => ['sometimes', 'integer', 'min:0'],
+            'variants.*.stock_quantity' => ['sometimes', 'integer', 'min:0'],
+            'variants.*.display_quantity' => ['sometimes', 'integer', 'min:0'],
             'description' => ['nullable', 'string', 'max:3000'],
             'sale_price' => [$product ? 'sometimes' : 'required', 'numeric', 'min:0'],
             'stock_quantity' => ['sometimes', 'integer', 'min:0'],
@@ -237,23 +243,23 @@ class ProductController extends Controller
         }
 
         if (isset($data['variants'])) {
-            $variants = [];
-            foreach ((array) $data['variants'] as $variant) {
-                $size = strip_tags(trim((string) ($variant['size'] ?? '')));
-                $quantity = max(0, (int) ($variant['quantity'] ?? 0));
-                if ($size === '') {
-                    continue;
-                }
-                $variants[] = ['size' => $size, 'quantity' => $quantity];
-            }
-
+            $variants = $this->sanitizeVariants((array) $data['variants']);
             if (empty($variants)) {
                 throw ValidationException::withMessages(['variants' => 'Добавьте хотя бы один размер.']);
             }
-
             $data['variants'] = array_values($variants);
             $data['size'] = implode(', ', array_map(fn ($v) => $v['size'], $data['variants']));
-            $data['stock_quantity'] = array_sum(array_map(fn ($v) => (int) $v['quantity'], $data['variants']));
+            $data['stock_quantity'] = array_sum(array_map(fn ($v) => (int) $v['stock_quantity'], $data['variants']));
+            $data['display_quantity'] = array_sum(array_map(fn ($v) => (int) $v['display_quantity'], $data['variants']));
+        } elseif (array_key_exists('size', $data) && trim((string) ($data['size'] ?? '')) !== '') {
+            $size = strip_tags(trim((string) $data['size']));
+            $stock = (int) ($data['stock_quantity'] ?? ($product?->stock_quantity ?? 0));
+            $display = (int) ($data['display_quantity'] ?? ($product?->display_quantity ?? 0));
+            $data['variants'] = [[
+                'size' => $size,
+                'stock_quantity' => max(0, $stock),
+                'display_quantity' => max(0, $display),
+            ]];
         }
 
         if (!array_key_exists('stock_quantity', $data)) {
@@ -266,5 +272,26 @@ class ProductController extends Controller
         unset($data['photo']);
 
         return $data;
+    }
+
+    private function sanitizeVariants(array $rawVariants): array
+    {
+        $variants = [];
+        foreach ($rawVariants as $variant) {
+            $size = strip_tags(trim((string) ($variant['size'] ?? '')));
+            if ($size === '') {
+                continue;
+            }
+            $stock = array_key_exists('stock_quantity', $variant)
+                ? (int) $variant['stock_quantity']
+                : (int) ($variant['quantity'] ?? 0);
+            $display = (int) ($variant['display_quantity'] ?? 0);
+            $variants[] = [
+                'size' => $size,
+                'stock_quantity' => max(0, $stock),
+                'display_quantity' => max(0, $display),
+            ];
+        }
+        return $variants;
     }
 }

@@ -39,6 +39,7 @@ class StockController extends Controller
 
         $movement = DB::transaction(function () use ($request, $data) {
             $product = Product::query()->lockForUpdate()->findOrFail($data['product_id']);
+            $variants = $this->normalizeVariants($product);
 
             if ($data['direction'] === 'stock_to_display') {
                 if ($product->stock_quantity < $data['quantity']) {
@@ -46,6 +47,7 @@ class StockController extends Controller
                 }
                 $product->stock_quantity -= $data['quantity'];
                 $product->display_quantity += $data['quantity'];
+                $this->moveVariantQuantity($variants, $data['quantity'], 'stock_quantity', 'display_quantity');
                 $from = 'stock';
                 $to = 'display';
             } else {
@@ -54,10 +56,12 @@ class StockController extends Controller
                 }
                 $product->display_quantity -= $data['quantity'];
                 $product->stock_quantity += $data['quantity'];
+                $this->moveVariantQuantity($variants, $data['quantity'], 'display_quantity', 'stock_quantity');
                 $from = 'display';
                 $to = 'stock';
             }
 
+            $product->variants = $variants;
             $product->refreshStatus();
             $product->save();
 
@@ -90,6 +94,7 @@ class StockController extends Controller
 
         $movement = DB::transaction(function () use ($request, $data) {
             $product = Product::query()->lockForUpdate()->findOrFail($data['product_id']);
+            $variants = $this->normalizeVariants($product);
             $stockDelta = (int) ($data['stock_delta'] ?? 0);
             $displayDelta = (int) ($data['display_delta'] ?? 0);
 
@@ -102,6 +107,9 @@ class StockController extends Controller
 
             $product->stock_quantity += $stockDelta;
             $product->display_quantity += $displayDelta;
+            $this->applyVariantDelta($variants, $stockDelta, 'stock_quantity');
+            $this->applyVariantDelta($variants, $displayDelta, 'display_quantity');
+            $product->variants = $variants;
             $product->refreshStatus();
             $product->save();
 
@@ -121,5 +129,66 @@ class StockController extends Controller
         $logger->log('stock.adjust', $movement, ['product_id' => $data['product_id']], $request);
 
         return response()->json($movement->load('product'));
+    }
+
+    private function normalizeVariants(Product $product): array
+    {
+        $variants = is_array($product->variants) ? $product->variants : [];
+        if (empty($variants)) {
+            return [[
+                'size' => $product->size ?: 'Без размера',
+                'stock_quantity' => (int) $product->stock_quantity,
+                'display_quantity' => (int) $product->display_quantity,
+            ]];
+        }
+        return array_map(function ($variant) {
+            return [
+                'size' => trim((string) ($variant['size'] ?? 'Без размера')),
+                'stock_quantity' => max(0, (int) ($variant['stock_quantity'] ?? $variant['quantity'] ?? 0)),
+                'display_quantity' => max(0, (int) ($variant['display_quantity'] ?? 0)),
+            ];
+        }, $variants);
+    }
+
+    private function moveVariantQuantity(array &$variants, int $quantity, string $fromKey, string $toKey): void
+    {
+        $left = $quantity;
+        foreach ($variants as &$variant) {
+            if ($left <= 0) {
+                break;
+            }
+            $available = (int) ($variant[$fromKey] ?? 0);
+            if ($available <= 0) {
+                continue;
+            }
+            $move = min($available, $left);
+            $variant[$fromKey] = $available - $move;
+            $variant[$toKey] = (int) ($variant[$toKey] ?? 0) + $move;
+            $left -= $move;
+        }
+    }
+
+    private function applyVariantDelta(array &$variants, int $delta, string $key): void
+    {
+        if ($delta === 0 || empty($variants)) {
+            return;
+        }
+        if ($delta > 0) {
+            $variants[0][$key] = (int) ($variants[0][$key] ?? 0) + $delta;
+            return;
+        }
+        $left = abs($delta);
+        foreach ($variants as &$variant) {
+            if ($left <= 0) {
+                break;
+            }
+            $value = (int) ($variant[$key] ?? 0);
+            if ($value <= 0) {
+                continue;
+            }
+            $cut = min($value, $left);
+            $variant[$key] = $value - $cut;
+            $left -= $cut;
+        }
     }
 }

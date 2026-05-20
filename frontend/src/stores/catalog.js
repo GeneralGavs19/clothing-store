@@ -28,7 +28,8 @@ export const useCatalogStore = defineStore('catalog', {
         if (key === 'variants' && Array.isArray(value)) {
           value.forEach((variant, index) => {
             form.append(`variants[${index}][size]`, variant.size ?? '')
-            form.append(`variants[${index}][quantity]`, String(variant.quantity ?? 0))
+            form.append(`variants[${index}][stock_quantity]`, String(variant.stock_quantity ?? variant.quantity ?? 0))
+            form.append(`variants[${index}][display_quantity]`, String(variant.display_quantity ?? 0))
           })
           return
         }
