@@ -68,11 +68,20 @@
             </div>
             <div class="flex shrink-0 items-center gap-1.5">
               <button
-                v-if="auth.canManageCatalog && (product.stock_quantity > 0 || product.display_quantity > 0)"
+                v-if="auth.canManageCatalog && product.stock_quantity > 0"
                 type="button"
                 class="btn-icon"
-                :title="moveButtonTitle(product)"
-                @click="moveProduct(product)"
+                title="В магазин (1 шт.)"
+                @click="moveToStore(product)"
+              >
+                <ArrowRightLeft class="h-4 w-4" />
+              </button>
+              <button
+                v-if="auth.canManageCatalog && product.display_quantity > 0"
+                type="button"
+                class="btn-icon"
+                title="На склад (1 шт.)"
+                @click="moveToStock(product)"
               >
                 <ArrowRightLeft class="h-4 w-4" />
               </button>
@@ -350,21 +359,30 @@ async function saveProduct() {
   }
 }
 
-function moveButtonTitle(product) {
-  if (product.stock_quantity > 0) return 'В магазин (1 шт.)'
-  return 'На склад (1 шт.)'
-}
-
-async function moveProduct(product) {
+async function moveToStore(product) {
   try {
-    const toDisplay = product.stock_quantity > 0
     await catalog.transferStock({
       product_id: product.id,
       quantity: 1,
-      direction: toDisplay ? 'stock_to_display' : 'display_to_stock',
-      note: toDisplay ? 'Перенос в магазин' : 'Возврат на склад',
+      direction: 'stock_to_display',
+      note: 'Перенос в магазин',
     })
-    toast.push(toDisplay ? 'Перенесено в магазин' : 'Перенесено на склад')
+    toast.push('Перенесено в магазин')
+    await fetchProducts(filters.page)
+  } catch (error) {
+    toast.push(apiError(error), 'error')
+  }
+}
+
+async function moveToStock(product) {
+  try {
+    await catalog.transferStock({
+      product_id: product.id,
+      quantity: 1,
+      direction: 'display_to_stock',
+      note: 'Возврат на склад',
+    })
+    toast.push('Перенесено на склад')
     await fetchProducts(filters.page)
   } catch (error) {
     toast.push(apiError(error), 'error')

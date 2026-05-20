@@ -42,6 +42,7 @@ class SalesService
                 $product = $products->get((int) $item['product_id']);
                 $quantity = (int) $item['quantity'];
                 $source = ($item['source'] ?? 'display') === 'stock' ? 'stock' : 'display';
+                $variantSize = isset($item['variant_size']) ? trim((string) $item['variant_size']) : null;
                 $purchase = 0;
                 $salePrice = (float) $product->sale_price;
                 $lineTotal = round($salePrice * $quantity, 2);
@@ -53,17 +54,14 @@ class SalesService
                     'product_sku' => $product->sku,
                     'quantity' => $quantity,
                     'source_location' => $source,
+                    'variant_size' => $variantSize ?: null,
                     'purchase_price' => $purchase,
                     'sale_price' => $salePrice,
                     'line_total' => $lineTotal,
                     'line_profit' => $lineProfit,
                 ]);
 
-                if ($source === 'stock') {
-                    $product->stock_quantity = max(0, (int) $product->stock_quantity - $quantity);
-                } else {
-                    $product->display_quantity = max(0, (int) $product->display_quantity - $quantity);
-                }
+                $this->applyVariantSale($product, $quantity, $source, $variantSize);
 
                 $product->refreshStatus();
                 $product->save();
@@ -207,12 +205,7 @@ class SalesService
                         }
 
                         $source = $item->source_location ?? 'display';
-
-                        if ($source === 'stock') {
-                            $product->stock_quantity += (int) $item->quantity;
-                        } else {
-                            $product->display_quantity += (int) $item->quantity;
-                        }
+                        $this->restoreVariantQuantity($product, (int) $item->quantity, $source, $item->variant_size);
 
                         $product->refreshStatus();
                         $product->save();
@@ -335,6 +328,7 @@ class SalesService
                 'product_id' => (int) $row['product_id'],
                 'quantity' => (int) $row['quantity'],
                 'source' => ($row['source'] ?? 'display') === 'stock' ? 'stock' : 'display',
+                'variant_size' => isset($row['variant_size']) ? trim((string) $row['variant_size']) : null,
             ];
         });
 
@@ -345,16 +339,87 @@ class SalesService
                 throw ValidationException::withMessages(['items' => 'Товар недоступен для продажи.']);
             }
 
-            $available = $row['source'] === 'stock'
-                ? (int) $product->stock_quantity
-                : (int) $product->display_quantity;
+            $available = $this->availableForSource($product, $row['source'], $row['variant_size']);
 
             if ($row['quantity'] > $available) {
                 $place = $row['source'] === 'stock' ? 'складе' : 'витрине';
+                $sizeLabel = $row['variant_size'] ? ' (размер '.$row['variant_size'].')' : '';
                 throw ValidationException::withMessages([
-                    'items' => "На {$place} только {$available} шт. для «{$product->name}».",
+                    'items' => "На {$place} только {$available} шт.{$sizeLabel} для «{$product->name}».",
                 ]);
             }
         }
+    }
+
+    private function availableForSource(Product $product, string $source, ?string $variantSize = null): int
+    {
+        if (!$variantSize) {
+            return $source === 'stock' ? (int) $product->stock_quantity : (int) $product->display_quantity;
+        }
+        $variants = is_array($product->variants) ? $product->variants : [];
+        foreach ($variants as $variant) {
+            if (trim((string) ($variant['size'] ?? '')) !== $variantSize) {
+                continue;
+            }
+            return $source === 'stock'
+                ? (int) ($variant['stock_quantity'] ?? $variant['quantity'] ?? 0)
+                : (int) ($variant['display_quantity'] ?? 0);
+        }
+        return 0;
+    }
+
+    private function applyVariantSale(Product $product, int $quantity, string $source, ?string $variantSize): void
+    {
+        $variants = is_array($product->variants) ? $product->variants : [];
+        if (!$variantSize || empty($variants)) {
+            if ($source === 'stock') {
+                $product->stock_quantity = max(0, (int) $product->stock_quantity - $quantity);
+            } else {
+                $product->display_quantity = max(0, (int) $product->display_quantity - $quantity);
+            }
+            return;
+        }
+
+        $key = $source === 'stock' ? 'stock_quantity' : 'display_quantity';
+        foreach ($variants as &$variant) {
+            if (trim((string) ($variant['size'] ?? '')) !== $variantSize) {
+                continue;
+            }
+            $current = (int) ($variant[$key] ?? 0);
+            $variant[$key] = max(0, $current - $quantity);
+            break;
+        }
+        $product->variants = $variants;
+        $product->stock_quantity = (int) collect($variants)->sum(fn ($v) => (int) ($v['stock_quantity'] ?? $v['quantity'] ?? 0));
+        $product->display_quantity = (int) collect($variants)->sum(fn ($v) => (int) ($v['display_quantity'] ?? 0));
+    }
+
+    private function restoreVariantQuantity(Product $product, int $quantity, string $source, ?string $variantSize): void
+    {
+        $variants = is_array($product->variants) ? $product->variants : [];
+        if (!$variantSize || empty($variants)) {
+            if ($source === 'stock') {
+                $product->stock_quantity += $quantity;
+            } else {
+                $product->display_quantity += $quantity;
+            }
+            return;
+        }
+        $key = $source === 'stock' ? 'stock_quantity' : 'display_quantity';
+        $found = false;
+        foreach ($variants as &$variant) {
+            if (trim((string) ($variant['size'] ?? '')) !== $variantSize) {
+                continue;
+            }
+            $variant[$key] = (int) ($variant[$key] ?? 0) + $quantity;
+            $found = true;
+            break;
+        }
+        if (!$found) {
+            $variants[] = ['size' => $variantSize, 'stock_quantity' => 0, 'display_quantity' => 0, $key => $quantity];
+        }
+        $product->variants = $variants;
+        $product->stock_quantity = (int) collect($variants)->sum(fn ($v) => (int) ($v['stock_quantity'] ?? $v['quantity'] ?? 0));
+        $product->display_quantity = (int) collect($variants)->sum(fn ($v) => (int) ($v['display_quantity'] ?? 0));
     }
 }

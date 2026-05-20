@@ -16,6 +16,7 @@ class SaleItem extends Model
         'product_sku',
         'quantity',
         'source_location',
+        'variant_size',
         'purchase_price',
         'sale_price',
         'line_total',
@@ -44,6 +45,7 @@ class SaleItem extends Model
 
     public function getDisplayNameAttribute(): string
     {
-        return $this->product_name ?: $this->product?->name ?: 'Удалённый товар';
+        $base = $this->product_name ?: $this->product?->name ?: 'Удалённый товар';
+        return $this->variant_size ? $base.' · '.$this->variant_size : $base;
     }
 }

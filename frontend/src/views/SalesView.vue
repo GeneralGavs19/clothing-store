@@ -34,7 +34,7 @@
             <div class="min-w-0 flex-1">
               <div class="truncate text-sm font-medium">{{ product.name }}</div>
               <div class="text-xs text-slate-500">
-                код {{ product.sku }}<span v-if="product.size"> · {{ product.size }}</span> · склад {{ product.stock_quantity }} · витрина {{ product.display_quantity }}
+                код {{ product.sku }}<span v-if="product.size"> · {{ product.size }}</span> · склад {{ product.stock_quantity }} · в магазине {{ product.display_quantity }}
               </div>
             </div>
             <div class="text-sm font-semibold">{{ money(product.sale_price) }}</div>
@@ -78,9 +78,17 @@
                   />
                 </label>
                 <label class="block">
+                  <span class="mb-1 block text-xs text-slate-500">Размер</span>
+                  <select v-model="item.variant_size" class="select h-9" @change="onVariantChange(item)">
+                    <option v-for="option in variantOptions(item.product, item.source)" :key="option.size" :value="option.size">
+                      {{ option.size }} ({{ option.available }})
+                    </option>
+                  </select>
+                </label>
+                <label class="block">
                   <span class="mb-1 block text-xs text-slate-500">Списать с</span>
-                  <select v-model="item.source" class="select h-9" @change="clampQty(item)">
-                    <option value="display" :disabled="!item.product.display_quantity">Витрина ({{ item.product.display_quantity }})</option>
+                  <select v-model="item.source" class="select h-9" @change="onSourceChange(item)">
+                    <option value="display" :disabled="!item.product.display_quantity">В магазине ({{ item.product.display_quantity }})</option>
                     <option value="stock" :disabled="!item.product.stock_quantity">Склад ({{ item.product.stock_quantity }})</option>
                   </select>
                 </label>
@@ -205,6 +213,7 @@ function photoUrl(path) {
 }
 
 function maxQty(item) {
+  if (item.variant_size) return variantAvailable(item.product, item.variant_size, item.source)
   return item.source === 'stock' ? Number(item.product.stock_quantity) : Number(item.product.display_quantity)
 }
 
@@ -224,7 +233,8 @@ function addToCart(product) {
     return
   }
   const source = product.display_quantity > 0 ? 'display' : 'stock'
-  cart.value.push({ product, quantity: 1, source })
+  const options = variantOptions(product, source)
+  cart.value.push({ product, quantity: 1, source, variant_size: options[0]?.size || null })
 }
 
 function removeFromCart(productId) {
@@ -240,6 +250,7 @@ async function createSale() {
         product_id: item.product.id,
         quantity: item.quantity,
         source: item.source,
+        variant_size: item.variant_size || undefined,
       })),
       cashier_note: cashierNote.value,
     })
@@ -280,7 +291,7 @@ function saleTitle(sale) {
 }
 
 function sourceLabel(source) {
-  return source === 'stock' ? 'со склада' : 'с витрины'
+  return source === 'stock' ? 'со склада' : 'из магазина'
 }
 
 function money(value) {
@@ -314,4 +325,37 @@ onMounted(() => {
 })
 
 onUnmounted(() => window.clearInterval(timer))
+
+function variantOptions(product, source) {
+  const variants = Array.isArray(product?.variants) ? product.variants : []
+  if (!variants.length) {
+    const available = source === 'stock' ? Number(product?.stock_quantity || 0) : Number(product?.display_quantity || 0)
+    return [{ size: product?.size || 'Без размера', available }]
+  }
+  return variants
+    .map((variant) => ({
+      size: String(variant?.size || 'Без размера'),
+      available: source === 'stock' ? Number(variant?.stock_quantity ?? variant?.quantity ?? 0) : Number(variant?.display_quantity || 0),
+    }))
+    .filter((variant) => variant.available > 0)
+}
+
+function variantAvailable(product, size, source) {
+  const variants = Array.isArray(product?.variants) ? product.variants : []
+  const variant = variants.find((row) => String(row?.size || '') === String(size || ''))
+  if (!variant) return 0
+  return source === 'stock' ? Number(variant?.stock_quantity ?? variant?.quantity ?? 0) : Number(variant?.display_quantity || 0)
+}
+
+function onVariantChange(item) {
+  clampQty(item)
+}
+
+function onSourceChange(item) {
+  const options = variantOptions(item.product, item.source)
+  if (!options.find((option) => option.size === item.variant_size)) {
+    item.variant_size = options[0]?.size || null
+  }
+  clampQty(item)
+}
 </script>

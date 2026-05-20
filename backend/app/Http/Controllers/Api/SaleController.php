@@ -44,6 +44,7 @@ class SaleController extends Controller
             'items.*.product_id' => ['required', 'exists:products,id'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
             'items.*.source' => ['nullable', 'in:display,stock'],
+            'items.*.variant_size' => ['nullable', 'string', 'max:32'],
             'cashier_note' => ['nullable', 'string', 'max:1000'],
         ]);
 
