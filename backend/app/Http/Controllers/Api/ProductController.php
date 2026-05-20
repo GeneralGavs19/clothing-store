@@ -182,6 +182,7 @@ class ProductController extends Controller
                     'name' => $name,
                     'sku' => $sku !== '' ? $sku : null,
                     'size' => $size !== '' ? $size : null,
+                    'variants' => $size !== '' ? [['size' => $size, 'quantity' => $stockQty]] : null,
                     'description' => $description !== '' ? $description : null,
                     'sale_price' => $salePrice,
                     'stock_quantity' => $stockQty,
@@ -211,10 +212,13 @@ class ProductController extends Controller
             'name' => [$product ? 'sometimes' : 'required', 'string', 'max:180'],
             'sku' => [$product ? 'sometimes' : 'nullable', 'string', 'max:80', Rule::unique('products', 'sku')->ignore($product)],
             'size' => ['nullable', 'string', 'max:32'],
+            'variants' => ['nullable', 'array', 'min:1'],
+            'variants.*.size' => ['required_with:variants', 'string', 'max:32'],
+            'variants.*.quantity' => ['required_with:variants', 'integer', 'min:0'],
             'description' => ['nullable', 'string', 'max:3000'],
             'sale_price' => [$product ? 'sometimes' : 'required', 'numeric', 'min:0'],
-            'stock_quantity' => [$product ? 'sometimes' : 'required', 'integer', 'min:0'],
-            'display_quantity' => [$product ? 'sometimes' : 'required', 'integer', 'min:0'],
+            'stock_quantity' => ['sometimes', 'integer', 'min:0'],
+            'display_quantity' => ['sometimes', 'integer', 'min:0'],
             'low_stock_threshold' => ['sometimes', 'integer', 'min:0'],
             'status' => ['sometimes', Rule::in(['active', 'low_stock', 'out_of_stock'])],
             'photo' => ['nullable', 'image', 'max:4096'],
@@ -230,6 +234,33 @@ class ProductController extends Controller
 
         if (array_key_exists('sku', $data) && trim((string) $data['sku']) === '') {
             $data['sku'] = null;
+        }
+
+        if (isset($data['variants'])) {
+            $variants = [];
+            foreach ((array) $data['variants'] as $variant) {
+                $size = strip_tags(trim((string) ($variant['size'] ?? '')));
+                $quantity = max(0, (int) ($variant['quantity'] ?? 0));
+                if ($size === '') {
+                    continue;
+                }
+                $variants[] = ['size' => $size, 'quantity' => $quantity];
+            }
+
+            if (empty($variants)) {
+                throw ValidationException::withMessages(['variants' => 'Добавьте хотя бы один размер.']);
+            }
+
+            $data['variants'] = array_values($variants);
+            $data['size'] = implode(', ', array_map(fn ($v) => $v['size'], $data['variants']));
+            $data['stock_quantity'] = array_sum(array_map(fn ($v) => (int) $v['quantity'], $data['variants']));
+        }
+
+        if (!array_key_exists('stock_quantity', $data)) {
+            $data['stock_quantity'] = $product ? (int) $product->stock_quantity : 0;
+        }
+        if (!array_key_exists('display_quantity', $data)) {
+            $data['display_quantity'] = $product ? (int) $product->display_quantity : 0;
         }
 
         unset($data['photo']);

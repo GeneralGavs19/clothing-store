@@ -108,10 +108,7 @@
           <span class="mb-1 block text-sm font-medium">Код товара</span>
           <input v-model="form.sku" class="input" placeholder="Необязательно. Например: SAM-GAL-001" />
         </label>
-        <label class="block">
-          <span class="mb-1 block text-sm font-medium">Размер</span>
-          <input v-model="form.size" class="input" placeholder="Например: M, 42, 10–12 лет" />
-        </label>
+        <div class="block" />
         <label class="block sm:col-span-2">
           <span class="mb-1 block text-sm font-medium">Категория</span>
           <select v-model="form.category_id" class="select">
@@ -123,18 +120,33 @@
           <span class="mb-1 block text-sm font-medium">Цена продажи</span>
           <input v-model.number="form.sale_price" class="input" type="number" min="0" step="0.01" required />
         </label>
-        <label class="block">
-          <span class="mb-1 block text-sm font-medium">На складе</span>
-          <input v-model.number="form.stock_quantity" class="input" type="number" min="0" required />
-        </label>
+        <div class="block sm:col-span-2">
+          <div class="mb-1 flex items-center justify-between gap-2">
+            <span class="text-sm font-medium">Размеры и количество</span>
+            <button type="button" class="btn-muted h-8 px-3" @click="addVariantRow">+ Добавить размер</button>
+          </div>
+          <div class="space-y-2 rounded-md border border-slate-200 p-3 dark:border-slate-800">
+            <div class="grid grid-cols-[1fr_1fr_auto] gap-2 text-xs text-slate-500">
+              <span>Размер</span>
+              <span>Количество</span>
+              <span />
+            </div>
+            <div v-for="(variant, index) in form.variants" :key="`variant-${index}`" class="grid grid-cols-[1fr_1fr_auto] gap-2">
+              <input v-model="variant.size" class="input" placeholder="Например: 98, 100, XL" />
+              <input v-model.number="variant.quantity" class="input" type="number" min="0" />
+              <button type="button" class="btn-muted h-10 px-3" :disabled="form.variants.length === 1" @click="removeVariantRow(index)">
+                ×
+              </button>
+            </div>
+          </div>
+        </div>
         <label class="block">
           <span class="mb-1 block text-sm font-medium">В магазине</span>
           <input v-model.number="form.display_quantity" class="input" type="number" min="0" required />
         </label>
-        <label v-if="!editing?.id" class="block sm:col-span-2">
-          <span class="mb-1 block text-sm font-medium">Быстрое добавление размеров</span>
-          <p class="mb-1 text-xs text-slate-500">Каждая строка: размер и количество (например: 89 3 или 67x2). Создаст отдельный товар на каждый размер.</p>
-          <textarea v-model="form.bulk_sizes_text" class="textarea" rows="4" placeholder="89 3&#10;67 2&#10;XL 5" />
+        <label class="block">
+          <span class="mb-1 block text-sm font-medium">На складе (авто)</span>
+          <input :value="stockFromVariants" class="input bg-slate-50 dark:bg-slate-900" type="number" disabled />
         </label>
         <label class="block sm:col-span-2">
           <span class="mb-1 block text-sm font-medium">Порог остатка</span>
@@ -168,8 +180,21 @@
           <div class="min-w-0 text-center sm:text-left">
             <h2 class="text-xl font-semibold">{{ detail.name }}</h2>
             <p class="text-sm text-slate-500">Код: {{ detail.sku }}</p>
-            <p v-if="detail.size" class="text-sm text-slate-500">Размер: {{ detail.size }}</p>
+            <p v-if="detail.size" class="text-sm text-slate-500">Размеры: {{ detail.size }}</p>
             <p class="mt-2 text-sm">{{ detail.category?.name || 'Без категории' }}</p>
+          </div>
+        </div>
+        <div v-if="detail.variants?.length" class="space-y-2">
+          <h3 class="text-sm font-medium">Варианты</h3>
+          <div class="overflow-hidden rounded-md border border-slate-200 dark:border-slate-800">
+            <div class="grid grid-cols-2 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-900">
+              <span>Размер</span>
+              <span>Количество</span>
+            </div>
+            <div v-for="(variant, index) in detail.variants" :key="`detail-variant-${index}`" class="grid grid-cols-2 px-3 py-2 text-sm">
+              <span>{{ variant.size }}</span>
+              <span>{{ variant.quantity }}</span>
+            </div>
           </div>
         </div>
         <div class="grid grid-cols-2 gap-3">
@@ -251,19 +276,21 @@ function emptyForm() {
     name: '',
     sku: '',
     size: '',
+    variants: [{ size: '', quantity: 0 }],
     category_id: '',
     description: '',
     sale_price: 0,
     stock_quantity: 0,
     display_quantity: 0,
     low_stock_threshold: 0,
-    bulk_sizes_text: '',
     photo: null,
   }
 }
 
 function resetForm(product = null) {
   Object.assign(form, emptyForm(), product || {})
+  form.variants = normalizeVariants(product?.variants, product?.size, product?.stock_quantity)
+  form.stock_quantity = stockFromVariantList(form.variants)
   form.photo = null
 }
 
@@ -302,25 +329,11 @@ function debouncedFetch() {
 async function saveProduct() {
   saving.value = true
   try {
-    const bulkItems = parseBulkSizes(form.bulk_sizes_text)
-    if (!editing.value?.id && bulkItems.length) {
-      for (let index = 0; index < bulkItems.length; index += 1) {
-        const item = bulkItems[index]
-        const payload = {
-          ...form,
-          size: item.size,
-          stock_quantity: item.quantity,
-          display_quantity: 0,
-          sku: makeSizedSku(form.sku, item.size, index),
-          bulk_sizes_text: undefined,
-        }
-        await catalog.saveProduct(payload)
-      }
-      toast.push(`Добавлено товаров: ${bulkItems.length}`)
-    } else {
-      await catalog.saveProduct(form, editing.value?.id)
-      toast.push('Товар сохранен')
-    }
+    const variants = normalizeVariants(form.variants)
+    if (!variants.length) throw new Error('Добавьте хотя бы один размер.')
+    const payload = { ...form, variants, stock_quantity: stockFromVariantList(variants) }
+    await catalog.saveProduct(payload, editing.value?.id)
+    toast.push('Товар сохранен')
     editorOpen.value = false
     await fetchProducts(filters.page)
   } catch (error) {
@@ -366,29 +379,32 @@ async function importProducts() {
   }
 }
 
-function parseBulkSizes(text) {
-  if (!text || !String(text).trim()) return []
-  const lines = String(text)
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-  const items = []
-  for (const line of lines) {
-    const match = line.match(/^(.+?)[\s,;:xх*]+(\d+)$/i)
-    if (!match) throw new Error(`Неверный формат строки: "${line}"`)
-    items.push({ size: match[1].trim(), quantity: Number(match[2]) })
+const stockFromVariants = computed(() => stockFromVariantList(form.variants))
+
+function normalizeVariants(rawVariants, fallbackSize = '', fallbackQty = 0) {
+  if (Array.isArray(rawVariants)) {
+    const prepared = rawVariants
+      .map((variant) => ({ size: String(variant?.size || '').trim(), quantity: Math.max(0, Number(variant?.quantity || 0)) }))
+      .filter((variant) => variant.size)
+    if (prepared.length) return prepared
   }
-  return items
+  if (String(fallbackSize || '').trim()) {
+    return [{ size: String(fallbackSize).trim(), quantity: Math.max(0, Number(fallbackQty || 0)) }]
+  }
+  return [{ size: '', quantity: 0 }]
 }
 
-function makeSizedSku(baseSku, size, index) {
-  const sku = String(baseSku || '').trim()
-  if (!sku) return ''
-  const normalizedSize = String(size || '')
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/[^A-Za-z0-9_-]/g, '')
-  return normalizedSize ? `${sku}-${normalizedSize}` : `${sku}-${index + 1}`
+function stockFromVariantList(list) {
+  return (list || []).reduce((sum, variant) => sum + Math.max(0, Number(variant?.quantity || 0)), 0)
+}
+
+function addVariantRow() {
+  form.variants.push({ size: '', quantity: 0 })
+}
+
+function removeVariantRow(index) {
+  form.variants.splice(index, 1)
+  if (!form.variants.length) addVariantRow()
 }
 
 function photoUrl(path) {

@@ -24,7 +24,15 @@ export const useCatalogStore = defineStore('catalog', {
     async saveProduct(payload, id = null) {
       const form = new FormData()
       Object.entries(payload).forEach(([key, value]) => {
-        if (value !== null && value !== undefined && value !== '') form.append(key, value)
+        if (value === null || value === undefined || value === '') return
+        if (key === 'variants' && Array.isArray(value)) {
+          value.forEach((variant, index) => {
+            form.append(`variants[${index}][size]`, variant.size ?? '')
+            form.append(`variants[${index}][quantity]`, String(variant.quantity ?? 0))
+          })
+          return
+        }
+        form.append(key, value)
       })
       const config = { headers: { 'Content-Type': 'multipart/form-data' } }
       if (id) {

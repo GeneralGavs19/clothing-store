@@ -15,6 +15,7 @@ class Product extends Model
         'name',
         'sku',
         'size',
+        'variants',
         'photo_path',
         'description',
         'purchase_price',
@@ -32,6 +33,7 @@ class Product extends Model
         'stock_quantity' => 'integer',
         'display_quantity' => 'integer',
         'low_stock_threshold' => 'integer',
+        'variants' => 'array',
     ];
 
     protected $appends = ['total_quantity', 'photo_url'];
