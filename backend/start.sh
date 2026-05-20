@@ -162,7 +162,7 @@ php artisan config:clear || true
 echo "==> Running migrations"
 php artisan migrate --force
 
-echo "==> Seeding database (idempotent)"
+echo "==> Seeding database (admin only by default)"
 php artisan db:seed --force
 
 php artisan storage:link || true

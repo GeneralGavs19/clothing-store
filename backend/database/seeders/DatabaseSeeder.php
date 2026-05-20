@@ -27,6 +27,8 @@ class DatabaseSeeder extends Seeder
             ],
         );
 
-        $this->call(DemoDataSeeder::class);
+        if (filter_var((string) env('DEMO_SEED', false), FILTER_VALIDATE_BOOL)) {
+            $this->call(DemoDataSeeder::class);
+        }
     }
 }

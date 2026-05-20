@@ -132,3 +132,4 @@ cd backend && DB_CONNECTION=sqlite DB_DATABASE=:memory: php artisan migrate:fres
 - Backend (Railway): привяжите MySQL; задайте `APP_KEY`, `JWT_SECRET`, `FRONTEND_URL`. Все `*.vercel.app` (preview и production) разрешены автоматически.
   - `APP_KEY`: локально `cd backend && php artisan key:generate --show` и вставьте значение в Railway.
 - Логин после seed: `admin@store.local` / `ChangeMe123!`
+- Демо-каталог по умолчанию не добавляется. Если нужен — установите `DEMO_SEED=true` перед `php artisan db:seed`.
