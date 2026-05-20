@@ -31,6 +31,7 @@ Route::middleware('jwt')->group(function () {
 
         Route::apiResource('categories', CategoryController::class)->except(['index', 'show']);
         Route::apiResource('products', ProductController::class)->except(['index', 'show']);
+        Route::post('products/import', [ProductController::class, 'import']);
 
         Route::get('sales-pending', [SaleController::class, 'pending']);
         Route::post('sales/{sale}/approve', [SaleController::class, 'approve']);

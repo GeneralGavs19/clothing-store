@@ -55,6 +55,12 @@ export const useCatalogStore = defineStore('catalog', {
     async transferStock(payload) {
       return api.post('/stock/transfer', payload)
     },
+    async importProducts(file, categoryId = '') {
+      const form = new FormData()
+      form.append('file', file)
+      if (categoryId) form.append('category_id', categoryId)
+      return api.post('/products/import', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+    },
     async adjustStock(payload) {
       return api.post('/stock/adjust', payload)
     },

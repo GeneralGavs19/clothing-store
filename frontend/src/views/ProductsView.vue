@@ -19,11 +19,14 @@
             <option value="name">По названию</option>
             <option value="sale_price">По цене</option>
             <option value="stock_quantity">По складу</option>
-            <option value="display_quantity">По витрине</option>
+            <option value="display_quantity">По магазину</option>
           </select>
         </div>
         <button v-if="auth.canManageCatalog" class="btn-primary w-full sm:ml-auto sm:w-auto" @click="openCreate">
           <Plus class="h-4 w-4" />Товар
+        </button>
+        <button v-if="auth.canManageCatalog" class="btn-muted w-full sm:w-auto" @click="openImport">
+          Импорт CSV
         </button>
       </div>
     </section>
@@ -61,15 +64,15 @@
           <div class="product-row__aside">
             <div class="min-w-0">
               <div class="text-base font-semibold tabular-nums">{{ money(product.sale_price) }}</div>
-              <div class="text-xs text-slate-500">витр. {{ product.display_quantity }} · склад {{ product.stock_quantity }}</div>
+              <div class="text-xs text-slate-500">в магазине {{ product.display_quantity }} · склад {{ product.stock_quantity }}</div>
             </div>
             <div class="flex shrink-0 items-center gap-1.5">
               <button
-                v-if="auth.canManageCatalog && product.stock_quantity > 0"
+                v-if="auth.canManageCatalog && (product.stock_quantity > 0 || product.display_quantity > 0)"
                 type="button"
                 class="btn-icon"
-                title="На витрину (1 шт.)"
-                @click="moveToDisplay(product)"
+                :title="moveButtonTitle(product)"
+                @click="moveProduct(product)"
               >
                 <ArrowRightLeft class="h-4 w-4" />
               </button>
@@ -103,7 +106,7 @@
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium">Код товара</span>
-          <input v-model="form.sku" class="input" required placeholder="Например: SAM-GAL-001" />
+          <input v-model="form.sku" class="input" placeholder="Необязательно. Например: SAM-GAL-001" />
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium">Размер</span>
@@ -125,12 +128,17 @@
           <input v-model.number="form.stock_quantity" class="input" type="number" min="0" required />
         </label>
         <label class="block">
-          <span class="mb-1 block text-sm font-medium">На витрине</span>
+          <span class="mb-1 block text-sm font-medium">В магазине</span>
           <input v-model.number="form.display_quantity" class="input" type="number" min="0" required />
+        </label>
+        <label v-if="!editing?.id" class="block sm:col-span-2">
+          <span class="mb-1 block text-sm font-medium">Быстрое добавление размеров</span>
+          <p class="mb-1 text-xs text-slate-500">Каждая строка: размер и количество (например: 89 3 или 67x2). Создаст отдельный товар на каждый размер.</p>
+          <textarea v-model="form.bulk_sizes_text" class="textarea" rows="4" placeholder="89 3&#10;67 2&#10;XL 5" />
         </label>
         <label class="block sm:col-span-2">
           <span class="mb-1 block text-sm font-medium">Порог остатка</span>
-          <p class="mb-1 text-xs text-slate-500">Если сумма склада и витрины ≤ порога — товар в «Низкий остаток»</p>
+          <p class="mb-1 text-xs text-slate-500">Если сумма склада и магазина ≤ порога — товар в «Низкий остаток»</p>
           <input v-model.number="form.low_stock_threshold" class="input" type="number" min="0" />
         </label>
         <label class="block sm:col-span-2">
@@ -167,13 +175,39 @@
         <div class="grid grid-cols-2 gap-3">
           <Info label="Цена" :value="money(detail.sale_price)" />
           <Info label="Склад" :value="detail.stock_quantity" />
-          <Info label="Витрина" :value="detail.display_quantity" />
+          <Info label="В магазине" :value="detail.display_quantity" />
           <Info label="Общий остаток" :value="detail.total_quantity" />
           <Info label="Порог остатка" :value="detail.low_stock_threshold" />
           <Info label="Обновлён" :value="date(detail.updated_at)" />
         </div>
         <p v-if="detail.description" class="text-sm text-slate-600 dark:text-slate-300">{{ detail.description }}</p>
       </div>
+    </ModalPanel>
+
+    <ModalPanel :open="importOpen" title="Импорт товаров (CSV)" @close="importOpen = false">
+      <form class="grid grid-cols-1 gap-4" @submit.prevent="importProducts">
+        <p class="text-sm text-slate-500">
+          Формат колонок: <b>name, sku, size, sale_price, stock_quantity, display_quantity, low_stock_threshold, description</b>.
+          Разделитель — запятая или точка с запятой. Первая строка может быть заголовком.
+        </p>
+        <label class="block">
+          <span class="mb-1 block text-sm font-medium">Категория для всех товаров (необязательно)</span>
+          <select v-model="importForm.category_id" class="select">
+            <option value="">Без категории</option>
+            <option v-for="category in catalog.categories" :key="category.id" :value="category.id">{{ category.name }}</option>
+          </select>
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-sm font-medium">CSV файл</span>
+          <input class="input py-2" type="file" accept=".csv,.txt" @change="importForm.file = $event.target.files[0]" required />
+        </label>
+        <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button type="button" class="btn-muted w-full sm:w-auto" @click="importOpen = false">Отмена</button>
+          <button class="btn-primary w-full sm:w-auto" :disabled="importing || !importForm.file">
+            <LoaderCircle v-if="importing" class="h-4 w-4 animate-spin" />Импортировать
+          </button>
+        </div>
+      </form>
     </ModalPanel>
   </div>
 </template>
@@ -200,11 +234,14 @@ const auth = useAuthStore()
 const catalog = useCatalogStore()
 const toast = useToastStore()
 const editorOpen = ref(false)
+const importOpen = ref(false)
 const saving = ref(false)
+const importing = ref(false)
 const editing = ref(null)
 const detail = ref(null)
 const filters = reactive({ search: '', category_id: '', status: '', sort: 'updated_at', direction: 'desc', page: 1, per_page: 12 })
 const form = reactive(emptyForm())
+const importForm = reactive({ category_id: '', file: null })
 let debounce
 
 const apiBase = computed(() => resolveApiOrigin())
@@ -219,7 +256,8 @@ function emptyForm() {
     sale_price: 0,
     stock_quantity: 0,
     display_quantity: 0,
-    low_stock_threshold: 5,
+    low_stock_threshold: 0,
+    bulk_sizes_text: '',
     photo: null,
   }
 }
@@ -241,6 +279,12 @@ function openEdit(product) {
   editorOpen.value = true
 }
 
+function openImport() {
+  importForm.category_id = ''
+  importForm.file = null
+  importOpen.value = true
+}
+
 function params(page = filters.page) {
   return { ...filters, page, category_id: filters.category_id || undefined, status: filters.status || undefined, search: filters.search || undefined }
 }
@@ -258,8 +302,25 @@ function debouncedFetch() {
 async function saveProduct() {
   saving.value = true
   try {
-    await catalog.saveProduct(form, editing.value?.id)
-    toast.push('Товар сохранен')
+    const bulkItems = parseBulkSizes(form.bulk_sizes_text)
+    if (!editing.value?.id && bulkItems.length) {
+      for (let index = 0; index < bulkItems.length; index += 1) {
+        const item = bulkItems[index]
+        const payload = {
+          ...form,
+          size: item.size,
+          stock_quantity: item.quantity,
+          display_quantity: 0,
+          sku: makeSizedSku(form.sku, item.size, index),
+          bulk_sizes_text: undefined,
+        }
+        await catalog.saveProduct(payload)
+      }
+      toast.push(`Добавлено товаров: ${bulkItems.length}`)
+    } else {
+      await catalog.saveProduct(form, editing.value?.id)
+      toast.push('Товар сохранен')
+    }
     editorOpen.value = false
     await fetchProducts(filters.page)
   } catch (error) {
@@ -269,14 +330,65 @@ async function saveProduct() {
   }
 }
 
-async function moveToDisplay(product) {
+function moveButtonTitle(product) {
+  if (product.stock_quantity > 0) return 'В магазин (1 шт.)'
+  return 'На склад (1 шт.)'
+}
+
+async function moveProduct(product) {
   try {
-    await catalog.transferStock({ product_id: product.id, quantity: 1, direction: 'stock_to_display', note: 'Пополнение витрины' })
-    toast.push('Витрина пополнена')
+    const toDisplay = product.stock_quantity > 0
+    await catalog.transferStock({
+      product_id: product.id,
+      quantity: 1,
+      direction: toDisplay ? 'stock_to_display' : 'display_to_stock',
+      note: toDisplay ? 'Перенос в магазин' : 'Возврат на склад',
+    })
+    toast.push(toDisplay ? 'Перенесено в магазин' : 'Перенесено на склад')
     await fetchProducts(filters.page)
   } catch (error) {
     toast.push(apiError(error), 'error')
   }
+}
+
+async function importProducts() {
+  if (!importForm.file) return
+  importing.value = true
+  try {
+    const { data } = await catalog.importProducts(importForm.file, importForm.category_id)
+    toast.push(`Импортировано товаров: ${data?.count ?? 0}`)
+    importOpen.value = false
+    await fetchProducts(1)
+  } catch (error) {
+    toast.push(apiError(error), 'error')
+  } finally {
+    importing.value = false
+  }
+}
+
+function parseBulkSizes(text) {
+  if (!text || !String(text).trim()) return []
+  const lines = String(text)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const items = []
+  for (const line of lines) {
+    const match = line.match(/^(.+?)[\s,;:xх*]+(\d+)$/i)
+    if (!match) throw new Error(`Неверный формат строки: "${line}"`)
+    items.push({ size: match[1].trim(), quantity: Number(match[2]) })
+  }
+  return items
+}
+
+function makeSizedSku(baseSku, size, index) {
+  const sku = String(baseSku || '').trim()
+  if (!sku) return ''
+  const normalizedSize = String(size || '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^A-Za-z0-9_-]/g, '')
+  return normalizedSize ? `${sku}-${normalizedSize}` : `${sku}-${index + 1}`
 }
 
 function photoUrl(path) {
@@ -328,7 +440,7 @@ onMounted(async () => {
 })
 
 async function confirmDelete(product) {
-  const warning = product.total_quantity > 0 ? '\n\nОстатки на складе и витрине будут списаны.' : ''
+  const warning = product.total_quantity > 0 ? '\n\nОстатки на складе и в магазине будут списаны.' : ''
   if (!confirm(`Удалить товар "${product.name}"?${warning}`)) return
   try {
     const { data } = await catalog.deleteProduct(product.id)
