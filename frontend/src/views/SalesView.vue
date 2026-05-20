@@ -12,7 +12,13 @@
             <RefreshCw class="h-4 w-4" />
           </button>
         </div>
-        <input v-model="productSearch" class="input" placeholder="Поиск по названию или коду" @input="debouncedProducts" />
+        <input
+          v-model="productSearch"
+          class="input"
+          placeholder="Сканируйте штрихкод или ищите по названию/коду"
+          @input="debouncedProducts"
+          @keyup.enter="addByBarcode"
+        />
         <div class="mt-4 max-h-[28rem] space-y-2 overflow-y-auto pr-1">
           <SkeletonBlock v-if="catalog.loadingProducts" custom-class="h-20" />
           <EmptyState
@@ -34,7 +40,7 @@
             <div class="min-w-0 flex-1">
               <div class="truncate text-sm font-medium">{{ product.name }}</div>
               <div class="text-xs text-slate-500">
-                код {{ product.sku }}<span v-if="product.size"> · {{ product.size }}</span> · склад {{ product.stock_quantity }} · в магазине {{ product.display_quantity }}
+                код {{ product.sku }}<span v-if="product.barcode"> · штрихкод {{ product.barcode }}</span><span v-if="product.size"> · {{ product.size }}</span> · склад {{ product.stock_quantity }} · в магазине {{ product.display_quantity }}
               </div>
             </div>
             <div class="text-sm font-semibold">{{ money(product.sale_price) }}</div>
@@ -272,6 +278,15 @@ async function fetchProducts() {
 function debouncedProducts() {
   window.clearTimeout(debounce)
   debounce = window.setTimeout(fetchProducts, 300)
+}
+
+function addByBarcode() {
+  const value = String(productSearch.value || '').trim()
+  if (!value) return
+  const product = availableProducts.value.find((item) => String(item.barcode || '') === value)
+  if (!product) return
+  addToCart(product)
+  productSearch.value = ''
 }
 
 async function fetchHistory(page = 1) {

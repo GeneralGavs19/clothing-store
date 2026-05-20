@@ -3,7 +3,7 @@
     <section class="panel p-4">
       <div class="flex flex-col gap-3">
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <input v-model="filters.search" class="input" placeholder="Поиск по названию, коду или размеру" @input="debouncedFetch" />
+          <input v-model="filters.search" class="input" placeholder="Поиск по названию, коду, штрихкоду или размеру" @input="debouncedFetch" />
           <select v-model="filters.category_id" class="select" @change="fetchProducts(1)">
             <option value="">Все категории</option>
             <option v-for="category in catalog.categories" :key="category.id" :value="category.id">{{ category.name }}</option>
@@ -56,6 +56,7 @@
               </div>
               <p class="mt-1 text-xs leading-relaxed text-slate-500">
                 код {{ product.sku }}
+                <span v-if="product.barcode"> · штрихкод {{ product.barcode }}</span>
                 <span v-if="product.size"> · размер {{ product.size }}</span>
                 · {{ product.category?.name || 'Без категории' }}
               </p>
@@ -117,7 +118,10 @@
           <span class="mb-1 block text-sm font-medium">Код товара</span>
           <input v-model="form.sku" class="input" placeholder="Необязательно. Например: SAM-GAL-001" />
         </label>
-        <div class="block" />
+        <label class="block">
+          <span class="mb-1 block text-sm font-medium">Штрихкод</span>
+          <input v-model="form.barcode" class="input" placeholder="Необязательно. Сгенерируется автоматически" />
+        </label>
         <label class="block sm:col-span-2">
           <span class="mb-1 block text-sm font-medium">Категория</span>
           <select v-model="form.category_id" class="select">
@@ -191,6 +195,7 @@
           <div class="min-w-0 text-center sm:text-left">
             <h2 class="text-xl font-semibold">{{ detail.name }}</h2>
             <p class="text-sm text-slate-500">Код: {{ detail.sku }}</p>
+            <p class="text-sm text-slate-500">Штрихкод: {{ detail.barcode || '—' }}</p>
             <p v-if="detail.size" class="text-sm text-slate-500">Размеры: {{ detail.size }}</p>
             <p class="mt-2 text-sm">{{ detail.category?.name || 'Без категории' }}</p>
           </div>
@@ -224,6 +229,7 @@
       <form class="grid grid-cols-1 gap-4" @submit.prevent="importProducts">
         <p class="text-sm text-slate-500">
           Формат колонок: <b>name, sku, size, sale_price, stock_quantity, display_quantity, low_stock_threshold, description</b>.
+          Можно также с barcode: <b>name, sku, barcode, size, sale_price, stock_quantity, display_quantity, low_stock_threshold, description</b>.
           Разделитель — запятая или точка с запятой. Первая строка может быть заголовком.
         </p>
         <label class="block">
@@ -286,6 +292,7 @@ function emptyForm() {
   return {
     name: '',
     sku: '',
+    barcode: '',
     size: '',
     variants: [{ size: '', stock_quantity: 0, display_quantity: 0 }],
     category_id: '',

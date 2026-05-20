@@ -14,6 +14,7 @@ class Product extends Model
         'category_id',
         'name',
         'sku',
+        'barcode',
         'size',
         'variants',
         'photo_path',
@@ -66,5 +67,23 @@ class Product extends Model
             $total <= $this->low_stock_threshold => 'low_stock',
             default => 'active',
         };
+    }
+
+    protected static function booted(): void
+    {
+        static::creating(function (Product $product) {
+            if (!$product->barcode) {
+                $product->barcode = self::generateUniqueBarcode();
+            }
+        });
+    }
+
+    private static function generateUniqueBarcode(): string
+    {
+        do {
+            $barcode = '28'.str_pad((string) random_int(1, 99999999999), 11, '0', STR_PAD_LEFT);
+        } while (self::query()->where('barcode', $barcode)->exists());
+
+        return $barcode;
     }
 }

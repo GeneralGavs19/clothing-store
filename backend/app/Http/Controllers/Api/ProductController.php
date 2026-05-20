@@ -21,6 +21,7 @@ class ProductController extends Controller
         if ($search = $request->string('search')->trim()->toString()) {
             $query->where(fn ($q) => $q->where('name', 'like', "%{$search}%")
                 ->orWhere('sku', 'like', "%{$search}%")
+                ->orWhere('barcode', 'like', "%{$search}%")
                 ->orWhere('size', 'like', "%{$search}%")
                 ->orWhere('description', 'like', "%{$search}%"));
         }
@@ -39,7 +40,7 @@ class ProductController extends Controller
 
         $sort = $request->string('sort', 'updated_at')->toString();
         $direction = $request->string('direction', 'desc')->lower()->toString() === 'asc' ? 'asc' : 'desc';
-        $allowedSorts = ['name', 'sku', 'size', 'sale_price', 'stock_quantity', 'display_quantity', 'updated_at', 'created_at'];
+        $allowedSorts = ['name', 'sku', 'barcode', 'size', 'sale_price', 'stock_quantity', 'display_quantity', 'updated_at', 'created_at'];
         $query->orderBy(in_array($sort, $allowedSorts, true) ? $sort : 'updated_at', $direction);
 
         return response()->json(ApiPagination::format($query->paginate($request->integer('per_page', 12))));
@@ -158,12 +159,14 @@ class ProductController extends Controller
             foreach ($rows as $index => $row) {
                 $name = strip_tags(trim((string) ($row[0] ?? '')));
                 $sku = strip_tags(trim((string) ($row[1] ?? '')));
-                $size = strip_tags(trim((string) ($row[2] ?? '')));
-                $salePrice = (float) ($row[3] ?? 0);
-                $stockQty = max(0, (int) ($row[4] ?? 0));
-                $displayQty = max(0, (int) ($row[5] ?? 0));
-                $threshold = isset($row[6]) ? max(0, (int) $row[6]) : 0;
-                $description = strip_tags(trim((string) ($row[7] ?? '')));
+                $hasBarcode = count($row) >= 9;
+                $barcode = strip_tags(trim((string) ($hasBarcode ? ($row[2] ?? '') : '')));
+                $size = strip_tags(trim((string) ($hasBarcode ? ($row[3] ?? '') : ($row[2] ?? ''))));
+                $salePrice = (float) ($hasBarcode ? ($row[4] ?? 0) : ($row[3] ?? 0));
+                $stockQty = max(0, (int) ($hasBarcode ? ($row[5] ?? 0) : ($row[4] ?? 0)));
+                $displayQty = max(0, (int) ($hasBarcode ? ($row[6] ?? 0) : ($row[5] ?? 0)));
+                $threshold = isset($row[$hasBarcode ? 7 : 6]) ? max(0, (int) $row[$hasBarcode ? 7 : 6]) : 0;
+                $description = strip_tags(trim((string) ($row[$hasBarcode ? 8 : 7] ?? '')));
 
                 if ($name === '') {
                     throw ValidationException::withMessages([
@@ -176,11 +179,17 @@ class ProductController extends Controller
                         'file' => 'Ошибка в строке '.($index + 1).': артикул уже существует ('.$sku.').',
                     ]);
                 }
+                if ($barcode !== '' && Product::query()->where('barcode', $barcode)->exists()) {
+                    throw ValidationException::withMessages([
+                        'file' => 'Ошибка в строке '.($index + 1).': штрихкод уже существует ('.$barcode.').',
+                    ]);
+                }
 
                 $product = new Product([
                     'category_id' => $data['category_id'] ?? null,
                     'name' => $name,
                     'sku' => $sku !== '' ? $sku : null,
+                    'barcode' => $barcode !== '' ? $barcode : null,
                     'size' => $size !== '' ? $size : null,
                     'variants' => $size !== '' ? [[
                         'size' => $size,
@@ -215,6 +224,7 @@ class ProductController extends Controller
             'category_id' => ['nullable', 'exists:categories,id'],
             'name' => [$product ? 'sometimes' : 'required', 'string', 'max:180'],
             'sku' => [$product ? 'sometimes' : 'nullable', 'string', 'max:80', Rule::unique('products', 'sku')->ignore($product)],
+            'barcode' => [$product ? 'sometimes' : 'nullable', 'string', 'max:64', Rule::unique('products', 'barcode')->ignore($product)],
             'size' => ['nullable', 'string', 'max:32'],
             'variants' => ['nullable', 'array', 'min:1'],
             'variants.*.size' => ['required_with:variants', 'string', 'max:32'],
@@ -232,7 +242,7 @@ class ProductController extends Controller
 
         $data = $request->validate($rules);
 
-        foreach (['name', 'sku', 'size', 'description'] as $field) {
+        foreach (['name', 'sku', 'barcode', 'size', 'description'] as $field) {
             if (isset($data[$field])) {
                 $data[$field] = strip_tags((string) $data[$field]);
             }
@@ -240,6 +250,9 @@ class ProductController extends Controller
 
         if (array_key_exists('sku', $data) && trim((string) $data['sku']) === '') {
             $data['sku'] = null;
+        }
+        if (array_key_exists('barcode', $data) && trim((string) $data['barcode']) === '') {
+            $data['barcode'] = null;
         }
 
         if (isset($data['variants'])) {
