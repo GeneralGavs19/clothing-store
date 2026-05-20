@@ -371,7 +371,7 @@ class SalesService
     private function applyVariantSale(Product $product, int $quantity, string $source, ?string $variantSize): void
     {
         $variants = is_array($product->variants) ? $product->variants : [];
-        if (!$variantSize || empty($variants)) {
+        if (empty($variants)) {
             if ($source === 'stock') {
                 $product->stock_quantity = max(0, (int) $product->stock_quantity - $quantity);
             } else {
@@ -381,13 +381,29 @@ class SalesService
         }
 
         $key = $source === 'stock' ? 'stock_quantity' : 'display_quantity';
-        foreach ($variants as &$variant) {
-            if (trim((string) ($variant['size'] ?? '')) !== $variantSize) {
-                continue;
+        if ($variantSize) {
+            foreach ($variants as &$variant) {
+                if (trim((string) ($variant['size'] ?? '')) !== $variantSize) {
+                    continue;
+                }
+                $current = (int) ($variant[$key] ?? 0);
+                $variant[$key] = max(0, $current - $quantity);
+                break;
             }
-            $current = (int) ($variant[$key] ?? 0);
-            $variant[$key] = max(0, $current - $quantity);
-            break;
+        } else {
+            $left = $quantity;
+            foreach ($variants as &$variant) {
+                if ($left <= 0) {
+                    break;
+                }
+                $current = (int) ($variant[$key] ?? 0);
+                if ($current <= 0) {
+                    continue;
+                }
+                $cut = min($current, $left);
+                $variant[$key] = $current - $cut;
+                $left -= $cut;
+            }
         }
         $product->variants = $variants;
         $product->stock_quantity = (int) collect($variants)->sum(fn ($v) => (int) ($v['stock_quantity'] ?? $v['quantity'] ?? 0));
