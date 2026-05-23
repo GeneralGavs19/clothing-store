@@ -108,7 +108,7 @@ class ReportController extends Controller
             ->leftJoin('products', 'products.id', '=', 'sale_items.product_id')
             ->leftJoin('categories', 'categories.id', '=', 'products.category_id')
             ->where('sales.status', 'approved')
-            ->selectRaw('DATE(sales.approved_at) as date, COALESCE(categories.name, "Без категории") as category, SUM(sale_items.line_total) as revenue')
+            ->selectRaw("DATE(sales.approved_at) as date, COALESCE(categories.name, 'Без категории') as category, SUM(sale_items.line_total) as revenue")
             ->groupBy('date', 'category')
             ->get()
             ->groupBy('date');

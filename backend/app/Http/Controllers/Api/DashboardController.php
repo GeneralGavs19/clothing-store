@@ -48,7 +48,7 @@ class DashboardController extends Controller
             ->groupBy(
                 DB::raw('COALESCE(products.id, sale_items.product_id)'),
                 DB::raw('COALESCE(sale_items.product_name, products.name)'),
-                DB::raw('COALESCE(sale_items.product_sku, products.sku)'),
+                'sale_items.product_sku',
                 'products.photo_path',
             )
             ->orderByDesc(DB::raw('SUM(sale_items.quantity)'))
@@ -56,7 +56,7 @@ class DashboardController extends Controller
             ->get([
                 DB::raw('COALESCE(products.id, sale_items.product_id) as id'),
                 DB::raw('COALESCE(sale_items.product_name, products.name) as name'),
-                DB::raw('COALESCE(sale_items.product_sku, products.sku) as sku'),
+                DB::raw('sale_items.product_sku as sku'),
                 'products.photo_path',
                 DB::raw('SUM(sale_items.quantity) as quantity'),
                 DB::raw('SUM(sale_items.line_total) as revenue'),
@@ -80,7 +80,7 @@ class DashboardController extends Controller
             ->orderByDesc(DB::raw('SUM(sale_items.line_total)'))
             ->limit(8)
             ->get([
-                DB::raw('COALESCE(categories.name, "Без категории") as name'),
+                DB::raw("COALESCE(categories.name, 'Без категории') as name"),
                 DB::raw('SUM(sale_items.line_total) as revenue'),
                 DB::raw('SUM(sale_items.line_profit) as profit'),
                 DB::raw('SUM(sale_items.quantity) as quantity'),
