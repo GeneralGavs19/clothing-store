@@ -77,7 +77,7 @@ class ProductController extends Controller
                 $payload['photo_path'] = $request->file('photo')->store('products', 'public');
             }
 
-            $product = new Product($payload + ['created_by' => $request->user()->id]);
+            $product = new Product($payload + ['created_by' => $request->user()->id, 'sale_price' => $payload['sale_price'] ?? 0]);
             $product->save();
 
             $this->syncVariants($product, $variantRows, $request, app(ProductItemService::class));
@@ -305,29 +305,28 @@ class ProductController extends Controller
         $productRules = [
             'category_id' => ['nullable', 'exists:categories,id'],
             'name' => [$product ? 'sometimes' : 'required', 'string', 'max:180'],
-            'brand' => ['nullable', 'string', 'max:120'],
             'color' => ['nullable', 'string', 'max:64'],
             'description' => ['nullable', 'string', 'max:3000'],
-            'purchase_price' => ['sometimes', 'numeric', 'min:0'],
+            'sale_price' => [$product ? 'sometimes' : 'required', 'numeric', 'min:0'],
             'base_sale_price' => ['nullable', 'numeric', 'min:0'],
             'status' => ['sometimes', Rule::in(['active', 'low_stock', 'out_of_stock'])],
             'photo' => ['nullable', 'image', 'max:4096'],
             'variants' => ['required', 'array', 'min:1'],
             'variants.*.id' => ['nullable', 'integer', 'exists:product_variants,id'],
             'variants.*.size' => ['required', 'string', 'max:64'],
-            'variants.*.quantity' => ['sometimes', 'integer', 'min:0'],
-            'variants.*.sku' => ['nullable', 'string', 'max:120'],
-            'variants.*.stock_warehouse' => ['sometimes', 'integer', 'min:0'],
-            'variants.*.stock_store' => ['sometimes', 'integer', 'min:0'],
-            'variants.*.low_stock_threshold' => ['sometimes', 'integer', 'min:0'],
-            'variants.*.sale_price' => ['required', 'numeric', 'min:0'],
-            'variants.*.purchase_price' => ['nullable', 'numeric', 'min:0'],
+            'variants.*.items' => ['nullable', 'array'],
+            'variants.*.items.*' => ['nullable', 'string', 'max:64'],
             'variants.*.position' => ['sometimes', 'integer', 'min:0'],
         ];
 
         $data = $request->validate($productRules);
 
-        foreach (['name', 'brand', 'color', 'description'] as $field) {
+        if (! isset($data['sale_price']) && isset($data['base_sale_price'])) {
+            $data['sale_price'] = $data['base_sale_price'];
+        }
+        unset($data['base_sale_price']);
+
+        foreach (['name', 'color', 'description'] as $field) {
             if (isset($data[$field])) {
                 $data[$field] = strip_tags((string) $data[$field]);
             }
@@ -396,26 +395,13 @@ class ProductController extends Controller
                 throw ValidationException::withMessages(['variants' => 'Укажите размер для каждого варианта.']);
             }
 
-            $wh = max(0, (int) ($row['stock_warehouse'] ?? $row['stock_quantity'] ?? 0));
-            $st = max(0, (int) ($row['stock_store'] ?? $row['display_quantity'] ?? 0));
-            if (array_key_exists('quantity', $row) && ! array_key_exists('stock_warehouse', $row) && ! array_key_exists('stock_store', $row)) {
-                $st = max(0, (int) $row['quantity']);
-                $wh = 0;
+            $items = [];
+            if (isset($row['items']) && is_array($row['items'])) {
+                $items = $row['items'];
             }
 
-            $sku = isset($row['sku']) ? trim(strip_tags((string) $row['sku'])) : '';
-            if ($sku === '') {
-                $sku = $this->proposeSku($category, $product->name, $size);
-                $sku = $this->ensureUniqueSku($sku, $id);
-            } else {
-                $sku = $this->ensureUniqueSku($sku, $id);
-            }
-
-            $salePrice = (float) ($row['sale_price'] ?? $row['price'] ?? 0);
-            $purchase = array_key_exists('purchase_price', $row) ? $row['purchase_price'] : null;
-            $purchase = $purchase === null ? null : (float) $purchase;
-
-            $low = max(0, (int) ($row['low_stock_threshold'] ?? 0));
+            $sku = $this->ensureUniqueSku($this->proposeSku($category, $product->name, $size), $id);
+            $productPrice = (float) $product->sale_price;
             $position = isset($row['position']) ? (int) $row['position'] : $index;
 
             $payload = [
@@ -423,9 +409,9 @@ class ProductController extends Controller
                 'sku' => $sku,
                 'stock_warehouse' => 0,
                 'stock_store' => 0,
-                'low_stock_threshold' => $low,
-                'sale_price' => $salePrice,
-                'purchase_price' => $purchase,
+                'low_stock_threshold' => 0,
+                'sale_price' => $productPrice,
+                'purchase_price' => 0,
                 'position' => $position,
             ];
 
@@ -444,7 +430,7 @@ class ProductController extends Controller
                 $variant = $product->variants()->create($payload);
             }
 
-            $itemService->syncVariantInventory($variant, $wh, $st);
+            $itemService->syncVariantItems($variant, $items);
 
             $keptIds[] = $variant->id;
         }

@@ -24,15 +24,13 @@
             <p class="mt-1 text-sm text-slate-500">
               {{ product.category?.name || 'Без категории' }}
               <span v-if="product.color"> · {{ product.color }}</span>
-              <span v-if="product.brand"> · {{ product.brand }}</span>
             </p>
             <p v-if="product.description" class="mt-3 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
               {{ product.description }}
             </p>
             <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Stat label="Цена от" :value="money(product.sale_price)" />
+              <Stat label="Цена" :value="money(product.sale_price)" />
               <Stat label="В магазине" :value="String(product.display_quantity ?? 0)" />
-              <Stat label="На складе" :value="String(product.stock_quantity ?? 0)" />
               <Stat label="Всего единиц" :value="String(totalItems)" />
             </div>
           </div>
@@ -49,18 +47,12 @@
               <tr>
                 <th class="px-4 py-2.5 text-left font-medium">Размер</th>
                 <th class="px-4 py-2.5 text-right font-medium">В магазине</th>
-                <th class="px-4 py-2.5 text-right font-medium">Склад</th>
-                <th class="px-4 py-2.5 text-right font-medium">Всего</th>
-                <th class="px-4 py-2.5 text-right font-medium">Цена</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-200 dark:divide-slate-800">
               <tr v-for="variant in product.variants || []" :key="variant.id">
                 <td class="px-4 py-3 font-medium">{{ variant.size }}</td>
                 <td class="px-4 py-3 text-right tabular-nums">{{ variant.stock_store ?? 0 }}</td>
-                <td class="px-4 py-3 text-right tabular-nums">{{ variant.stock_warehouse ?? 0 }}</td>
-                <td class="px-4 py-3 text-right tabular-nums">{{ variantStock(variant) }}</td>
-                <td class="px-4 py-3 text-right tabular-nums">{{ money(variant.sale_price) }}</td>
               </tr>
             </tbody>
           </table>

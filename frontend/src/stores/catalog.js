@@ -6,24 +6,10 @@ function appendVariantRow(form, variant, index) {
     form.append(`variants[${index}][id]`, String(variant.id))
   }
   form.append(`variants[${index}][size]`, variant.size ?? '')
-  if (variant.sku != null && String(variant.sku).trim() !== '') {
-    form.append(`variants[${index}][sku]`, String(variant.sku).trim())
-  }
-  const qty = variant.quantity ?? variant.stock_store ?? variant.display_quantity ?? 0
-  const wh = variant.stock_warehouse ?? variant.stock_quantity ?? 0
-  const st = variant.stock_store ?? variant.display_quantity ?? qty
-  if (variant.quantity != null && variant.quantity !== '' && !variant.stock_warehouse && !variant.stock_store) {
-    form.append(`variants[${index}][quantity]`, String(Math.max(0, Number(qty))))
-  } else {
-    form.append(`variants[${index}][stock_warehouse]`, String(Math.max(0, Number(wh))))
-    form.append(`variants[${index}][stock_store]`, String(Math.max(0, Number(st))))
-  }
-  form.append(`variants[${index}][low_stock_threshold]`, String(Math.max(0, Number(variant.low_stock_threshold ?? 0))))
-  const price = variant.sale_price ?? variant.price ?? 0
-  form.append(`variants[${index}][sale_price]`, String(Math.max(0, Number(price))))
-  if (variant.purchase_price != null && variant.purchase_price !== '') {
-    form.append(`variants[${index}][purchase_price]`, String(variant.purchase_price))
-  }
+  const codes = (variant.items || variant.codes || []).map((c) => String(c || '').trim()).filter(Boolean)
+  codes.forEach((code, i) => {
+    form.append(`variants[${index}][items][${i}]`, code)
+  })
   form.append(`variants[${index}][position]`, String(index))
 }
 

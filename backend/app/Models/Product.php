@@ -104,10 +104,9 @@ class Product extends Model
         $this->stock_quantity = (int) $variants->sum('stock_warehouse');
         $this->display_quantity = (int) $variants->sum('stock_store');
 
-        $prices = $variants->map(fn (ProductVariant $v) => (float) $v->sale_price)->filter(fn ($p) => $p > 0);
-        $this->sale_price = $prices->isEmpty()
-            ? (float) ($this->base_sale_price ?? (float) $variants->first()->sale_price)
-            : $prices->min();
+        if ($this->sale_price === null || (float) $this->sale_price <= 0) {
+            $this->sale_price = (float) ($this->base_sale_price ?? 0);
+        }
 
         $positiveThresholds = $variants->map(fn (ProductVariant $v) => (int) $v->low_stock_threshold)->filter(fn ($x) => $x >= 0);
         $this->low_stock_threshold = $positiveThresholds->isEmpty()

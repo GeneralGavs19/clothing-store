@@ -2,24 +2,65 @@
 
 namespace App\Services;
 
-use App\Models\Product;
 use App\Models\ProductItem;
 use App\Models\ProductVariant;
 use App\Models\Sale;
-use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class ProductItemService
 {
-    public function syncVariantInventory(ProductVariant $variant, int $warehouseTarget, int $storeTarget): void
+    public function syncVariantItems(ProductVariant $variant, array $codes): void
     {
-        $warehouseTarget = max(0, $warehouseTarget);
-        $storeTarget = max(0, $storeTarget);
+        $codes = array_values(array_unique(array_filter(array_map(
+            fn ($c) => trim((string) $c),
+            $codes
+        ))));
 
-        $variant->loadMissing('product');
-        $product = $variant->product;
+        foreach ($codes as $code) {
+            $taken = ProductItem::query()
+                ->where('code', $code)
+                ->where('product_variant_id', '!=', $variant->id)
+                ->exists();
+            if ($taken) {
+                throw ValidationException::withMessages([
+                    'variants' => "Код «{$code}» уже используется.",
+                ]);
+            }
+        }
 
-        $this->syncLocationCount($variant, $product, ProductItem::LOCATION_STOCK, $warehouseTarget);
-        $this->syncLocationCount($variant, $product, ProductItem::LOCATION_DISPLAY, $storeTarget);
+        $byCode = ProductItem::query()
+            ->where('product_variant_id', $variant->id)
+            ->get()
+            ->keyBy('code');
+
+        $keptIds = [];
+
+        foreach ($codes as $code) {
+            $item = $byCode->get($code);
+            if ($item) {
+                if ($item->status === ProductItem::STATUS_SOLD) {
+                    continue;
+                }
+                $item->location = ProductItem::LOCATION_DISPLAY;
+                $item->save();
+                $keptIds[] = $item->id;
+                continue;
+            }
+
+            $item = ProductItem::query()->create([
+                'product_variant_id' => $variant->id,
+                'code' => $code,
+                'status' => ProductItem::STATUS_AVAILABLE,
+                'location' => ProductItem::LOCATION_DISPLAY,
+            ]);
+            $keptIds[] = $item->id;
+        }
+
+        ProductItem::query()
+            ->where('product_variant_id', $variant->id)
+            ->where('status', ProductItem::STATUS_AVAILABLE)
+            ->when($keptIds !== [], fn ($q) => $q->whereNotIn('id', $keptIds))
+            ->delete();
 
         $this->resyncVariantStockFromItems($variant);
     }
@@ -95,60 +136,5 @@ class ProductItemService
             ->where('code', $code)
             ->with(['variant.product.category'])
             ->first();
-    }
-
-    private function syncLocationCount(ProductVariant $variant, Product $product, string $location, int $target): void
-    {
-        $current = ProductItem::query()
-            ->where('product_variant_id', $variant->id)
-            ->available()
-            ->where('location', $location)
-            ->count();
-
-        if ($target > $current) {
-            $toCreate = $target - $current;
-            $seq = (int) ProductItem::query()->where('product_variant_id', $variant->id)->count() + 1;
-
-            for ($i = 0; $i < $toCreate; $i++) {
-                ProductItem::query()->create([
-                    'product_variant_id' => $variant->id,
-                    'code' => $this->allocateUniqueCode($product, $variant, $seq + $i),
-                    'status' => ProductItem::STATUS_AVAILABLE,
-                    'location' => $location,
-                ]);
-            }
-
-            return;
-        }
-
-        if ($target < $current) {
-            $toRemove = $current - $target;
-            ProductItem::query()
-                ->where('product_variant_id', $variant->id)
-                ->available()
-                ->where('location', $location)
-                ->orderByDesc('id')
-                ->limit($toRemove)
-                ->delete();
-        }
-    }
-
-    public function allocateUniqueCode(Product $product, ProductVariant $variant, int $seq): string
-    {
-        $attempts = 0;
-        do {
-            $code = $this->buildCode($product, $variant, $seq + $attempts);
-            $attempts++;
-        } while (ProductItem::query()->where('code', $code)->exists() && $attempts < 500);
-
-        return $code;
-    }
-
-    private function buildCode(Product $product, ProductVariant $variant, int $seq): string
-    {
-        $namePart = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', Str::ascii($product->name)) ?: 'ITM', 0, 4));
-        $sizePart = strtoupper(preg_replace('/\s+/u', '', $variant->size !== '' && $variant->size !== '—' ? $variant->size : 'ONE'));
-
-        return sprintf('%s-%d-%s-%03d', $namePart, $variant->id, $sizePart, max(1, $seq));
     }
 }
