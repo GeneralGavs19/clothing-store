@@ -62,7 +62,7 @@
         <RouterLink
           v-for="product in lowStockProducts"
           :key="product.id"
-          :to="{ path: '/products', query: { search: product.sku } }"
+          :to="{ name: 'product-detail', params: { id: product.id } }"
           class="flex items-center justify-between rounded-md border border-amber-200/80 bg-white px-3 py-2 text-sm transition hover:border-amber-400 dark:border-amber-900 dark:bg-slate-950 dark:hover:border-amber-700"
         >
           <span class="truncate font-medium">{{ product.name }}</span>

@@ -8,7 +8,9 @@ use App\Models\Product;
 use App\Models\Sale;
 use App\Models\User;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class DashboardController extends Controller
 {
@@ -40,79 +42,98 @@ class DashboardController extends Controller
         $salesByDay = $this->aggregateSalesByLocalDay($chartStartUtc);
         $itemsByDay = $this->aggregateItemsByLocalDay($chartStartUtc);
 
-        $topProducts = DB::table('sale_items')
-            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
-            ->leftJoin('products', 'products.id', '=', 'sale_items.product_id')
-            ->where('sales.status', 'approved')
-            ->where('sales.approved_at', '>=', $chartStartUtc)
-            ->groupBy(
-                DB::raw('COALESCE(products.id, sale_items.product_id)'),
-                DB::raw('COALESCE(sale_items.product_name, products.name)'),
-                'sale_items.product_sku',
-                'products.photo_path',
-            )
-            ->orderByDesc(DB::raw('SUM(sale_items.quantity)'))
-            ->limit(10)
-            ->get([
-                DB::raw('COALESCE(products.id, sale_items.product_id) as id'),
-                DB::raw('COALESCE(sale_items.product_name, products.name) as name'),
-                DB::raw('sale_items.product_sku as sku'),
-                'products.photo_path',
-                DB::raw('SUM(sale_items.quantity) as quantity'),
-                DB::raw('SUM(sale_items.line_total) as revenue'),
-                DB::raw('SUM(sale_items.line_profit) as profit'),
-            ])
-            ->map(function ($row) {
-                $row->photo_url = $row->photo_path
-                    ? \Illuminate\Support\Facades\Storage::url($row->photo_path)
-                    : null;
-
-                return $row;
-            });
-
-        $categoryRevenue = DB::table('sale_items')
-            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
-            ->leftJoin('products', 'products.id', '=', 'sale_items.product_id')
-            ->leftJoin('categories', 'categories.id', '=', 'products.category_id')
-            ->where('sales.status', 'approved')
-            ->where('sales.approved_at', '>=', $chartStartUtc)
-            ->groupBy('categories.id', 'categories.name')
-            ->orderByDesc(DB::raw('SUM(sale_items.line_total)'))
-            ->limit(8)
-            ->get([
-                DB::raw("COALESCE(categories.name, 'Без категории') as name"),
-                DB::raw('SUM(sale_items.line_total) as revenue'),
-                DB::raw('SUM(sale_items.line_profit) as profit'),
-                DB::raw('SUM(sale_items.quantity) as quantity'),
-            ]);
-
-        $cashierActivity = User::query()
-            ->where('role', 'cashier')
-            ->withCount([
-                'sales as pending_sales_count' => fn ($q) => $q->where('status', 'pending'),
-                'sales as approved_sales_count' => fn ($q) => $q->where('status', 'approved'),
-            ])
-            ->orderByDesc('last_login_at')
-            ->limit(8)
-            ->get(['id', 'name', 'email', 'last_login_at', 'is_active']);
-
         return response()->json([
             'summary' => $summary,
             'chart_days' => self::CHART_DAYS,
             'store_timezone' => config('app.timezone'),
             'sales_by_day' => $this->fillDays($salesByDay, $itemsByDay, $range),
-            'top_products' => $topProducts,
-            'category_revenue' => $categoryRevenue,
+            'top_products' => $this->topProducts($chartStartUtc),
+            'category_revenue' => $this->categoryRevenue($chartStartUtc),
             'low_stock_products' => Product::query()
                 ->with('category')
                 ->whereRaw('(stock_quantity + display_quantity) <= low_stock_threshold')
                 ->orderByRaw('(stock_quantity + display_quantity) asc')
                 ->limit(8)
                 ->get(),
-            'cashier_activity' => $cashierActivity,
+            'cashier_activity' => User::query()
+                ->where('role', 'cashier')
+                ->withCount([
+                    'sales as pending_sales_count' => fn ($q) => $q->where('status', 'pending'),
+                    'sales as approved_sales_count' => fn ($q) => $q->where('status', 'approved'),
+                ])
+                ->orderByDesc('last_login_at')
+                ->limit(8)
+                ->get(['id', 'name', 'email', 'last_login_at', 'is_active']),
             'recent_activity' => ActivityLog::query()->with('user:id,name,email,role')->latest()->limit(12)->get(),
             'generated_at' => now(),
         ]);
+    }
+
+    private function topProducts(Carbon $chartStartUtc): Collection
+    {
+        $rows = DB::table('sale_items')
+            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+            ->leftJoin('products', 'products.id', '=', 'sale_items.product_id')
+            ->where('sales.status', 'approved')
+            ->where('sales.approved_at', '>=', $chartStartUtc)
+            ->get([
+                'sale_items.product_id',
+                'sale_items.product_name',
+                'sale_items.product_sku',
+                'products.name as product_name_live',
+                'products.photo_path',
+                'sale_items.quantity',
+                'sale_items.line_total',
+                'sale_items.line_profit',
+            ]);
+
+        return $rows
+            ->groupBy(fn ($row) => (int) ($row->product_id ?: 0).'|'.($row->product_name ?: $row->product_name_live ?: ''))
+            ->map(function (Collection $group) {
+                $first = $group->first();
+
+                return (object) [
+                    'id' => $first->product_id,
+                    'name' => $first->product_name ?: $first->product_name_live,
+                    'sku' => $first->product_sku,
+                    'photo_path' => $first->photo_path,
+                    'photo_url' => $first->photo_path ? Storage::url($first->photo_path) : null,
+                    'quantity' => (int) $group->sum('quantity'),
+                    'revenue' => (float) $group->sum('line_total'),
+                    'profit' => (float) $group->sum('line_profit'),
+                ];
+            })
+            ->sortByDesc('quantity')
+            ->take(10)
+            ->values();
+    }
+
+    private function categoryRevenue(Carbon $chartStartUtc): Collection
+    {
+        $rows = DB::table('sale_items')
+            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+            ->leftJoin('products', 'products.id', '=', 'sale_items.product_id')
+            ->leftJoin('categories', 'categories.id', '=', 'products.category_id')
+            ->where('sales.status', 'approved')
+            ->where('sales.approved_at', '>=', $chartStartUtc)
+            ->get([
+                'categories.name as category_name',
+                'sale_items.quantity',
+                'sale_items.line_total',
+                'sale_items.line_profit',
+            ]);
+
+        return $rows
+            ->groupBy(fn ($row) => $row->category_name ?: 'Без категории')
+            ->map(fn (Collection $group, string $name) => (object) [
+                'name' => $name,
+                'revenue' => (float) $group->sum('line_total'),
+                'profit' => (float) $group->sum('line_profit'),
+                'quantity' => (int) $group->sum('quantity'),
+            ])
+            ->sortByDesc('revenue')
+            ->take(8)
+            ->values();
     }
 
     private function storeTimezone(): string
