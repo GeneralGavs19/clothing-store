@@ -5,6 +5,7 @@ import AppShell from '../components/AppShell.vue'
 import LoginView from '../views/LoginView.vue'
 import DashboardView from '../views/DashboardView.vue'
 import ProductsView from '../views/ProductsView.vue'
+import ProductDetailView from '../views/ProductDetailView.vue'
 import CategoriesView from '../views/CategoriesView.vue'
 import SalesView from '../views/SalesView.vue'
 import UsersView from '../views/UsersView.vue'
@@ -23,6 +24,7 @@ const router = createRouter({
         { path: '', redirect: () => ({ name: homeRouteName(useAuthStore().user) }) },
         { path: 'dashboard', name: 'dashboard', component: DashboardView, meta: { access: 'dashboard' } },
         { path: 'products', name: 'products', component: ProductsView },
+        { path: 'products/:id', name: 'product-detail', component: ProductDetailView, props: true },
         { path: 'sales', name: 'sales', component: SalesView },
         { path: 'categories', name: 'categories', component: CategoriesView, meta: { access: 'catalog' } },
         { path: 'users', name: 'users', component: UsersView, meta: { access: 'users' } },

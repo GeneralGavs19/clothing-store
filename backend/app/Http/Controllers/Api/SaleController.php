@@ -41,12 +41,24 @@ class SaleController extends Controller
     {
         $data = $request->validate([
             'items' => ['required', 'array', 'min:1'],
-            'items.*.product_id' => ['required', 'exists:products,id'],
-            'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.product_id' => ['nullable', 'exists:products,id'],
+            'items.*.product_variant_id' => ['nullable', 'exists:product_variants,id'],
+            'items.*.product_item_id' => ['nullable', 'exists:product_items,id'],
+            'items.*.quantity' => ['nullable', 'integer', 'min:1'],
             'items.*.source' => ['nullable', 'in:display,stock'],
-            'items.*.variant_size' => ['nullable', 'string', 'max:32'],
             'cashier_note' => ['nullable', 'string', 'max:1000'],
         ]);
+
+        foreach ($data['items'] as $index => $row) {
+            if (! empty($row['product_item_id'])) {
+                continue;
+            }
+            if (empty($row['product_variant_id']) || empty($row['quantity'])) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    "items.{$index}" => 'Укажите вариант и количество или выберите код товара.',
+                ]);
+            }
+        }
 
         $sale = $sales->createCompleted(
             $request->user(),
@@ -112,11 +124,13 @@ class SaleController extends Controller
             'deleted_by' => $request->user()->only(['id', 'name', 'email', 'role']),
         ];
 
+        $statusBeforeDelete = $sale->status;
+
         $sales->deleteSale($sale, $request->user());
 
         $logger->log('sales.deleted', null, $meta, $request);
 
-        $message = $sale->status === 'approved'
+        $message = $statusBeforeDelete === 'approved'
             ? 'Продажа удалена. Остатки товаров возвращены.'
             : 'Продажа удалена.';
 

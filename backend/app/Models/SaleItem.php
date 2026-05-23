@@ -12,6 +12,9 @@ class SaleItem extends Model
     protected $fillable = [
         'sale_id',
         'product_id',
+        'product_variant_id',
+        'product_item_id',
+        'product_item_code',
         'product_name',
         'product_sku',
         'quantity',
@@ -43,9 +46,26 @@ class SaleItem extends Model
         return $this->belongsTo(Product::class);
     }
 
+    public function productVariant()
+    {
+        return $this->belongsTo(ProductVariant::class);
+    }
+
+    public function productItem()
+    {
+        return $this->belongsTo(ProductItem::class);
+    }
+
     public function getDisplayNameAttribute(): string
     {
         $base = $this->product_name ?: $this->product?->name ?: 'Удалённый товар';
-        return $this->variant_size ? $base.' · '.$this->variant_size : $base;
+        if ($this->product_item_code) {
+            return $base.' · '.$this->variant_size.' · '.$this->product_item_code;
+        }
+        if ($this->variant_size) {
+            return $base.' · '.$this->variant_size;
+        }
+
+        return $base;
     }
 }

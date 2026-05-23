@@ -20,6 +20,7 @@ Route::middleware('jwt')->group(function () {
     Route::post('auth/logout', [AuthController::class, 'logout']);
 
     Route::get('products', [ProductController::class, 'index']);
+    Route::get('product-items/lookup/{code}', [ProductController::class, 'lookupItem']);
     Route::get('products/{product}', [ProductController::class, 'show']);
     Route::get('categories', [CategoryController::class, 'index']);
     Route::get('categories/{category}', [CategoryController::class, 'show']);

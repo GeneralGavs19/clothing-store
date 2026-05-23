@@ -1,6 +1,32 @@
 import { defineStore } from 'pinia'
 import api from '../api/client'
 
+function appendVariantRow(form, variant, index) {
+  if (variant.id != null && variant.id !== '') {
+    form.append(`variants[${index}][id]`, String(variant.id))
+  }
+  form.append(`variants[${index}][size]`, variant.size ?? '')
+  if (variant.sku != null && String(variant.sku).trim() !== '') {
+    form.append(`variants[${index}][sku]`, String(variant.sku).trim())
+  }
+  const qty = variant.quantity ?? variant.stock_store ?? variant.display_quantity ?? 0
+  const wh = variant.stock_warehouse ?? variant.stock_quantity ?? 0
+  const st = variant.stock_store ?? variant.display_quantity ?? qty
+  if (variant.quantity != null && variant.quantity !== '' && !variant.stock_warehouse && !variant.stock_store) {
+    form.append(`variants[${index}][quantity]`, String(Math.max(0, Number(qty))))
+  } else {
+    form.append(`variants[${index}][stock_warehouse]`, String(Math.max(0, Number(wh))))
+    form.append(`variants[${index}][stock_store]`, String(Math.max(0, Number(st))))
+  }
+  form.append(`variants[${index}][low_stock_threshold]`, String(Math.max(0, Number(variant.low_stock_threshold ?? 0))))
+  const price = variant.sale_price ?? variant.price ?? 0
+  form.append(`variants[${index}][sale_price]`, String(Math.max(0, Number(price))))
+  if (variant.purchase_price != null && variant.purchase_price !== '') {
+    form.append(`variants[${index}][purchase_price]`, String(variant.purchase_price))
+  }
+  form.append(`variants[${index}][position]`, String(index))
+}
+
 export const useCatalogStore = defineStore('catalog', {
   state: () => ({
     products: [],
@@ -11,6 +37,14 @@ export const useCatalogStore = defineStore('catalog', {
     loadingCategories: false,
   }),
   actions: {
+    async fetchProduct(id) {
+      const { data } = await api.get(`/products/${id}`)
+      return data
+    },
+    async lookupItemByCode(code) {
+      const { data } = await api.get(`/product-items/lookup/${encodeURIComponent(code)}`)
+      return data
+    },
     async fetchProducts(params = {}) {
       this.loadingProducts = true
       try {
@@ -23,18 +57,24 @@ export const useCatalogStore = defineStore('catalog', {
     },
     async saveProduct(payload, id = null) {
       const form = new FormData()
+      const skipRoot = new Set(['variants', 'photo', 'stock_quantity', 'display_quantity', 'sku', 'barcode', 'size'])
+
       Object.entries(payload).forEach(([key, value]) => {
+        if (skipRoot.has(key)) return
         if (value === null || value === undefined || value === '') return
-        if (key === 'variants' && Array.isArray(value)) {
-          value.forEach((variant, index) => {
-            form.append(`variants[${index}][size]`, variant.size ?? '')
-            form.append(`variants[${index}][stock_quantity]`, String(variant.stock_quantity ?? variant.quantity ?? 0))
-            form.append(`variants[${index}][display_quantity]`, String(variant.display_quantity ?? 0))
-          })
-          return
-        }
         form.append(key, value)
       })
+
+      if (Array.isArray(payload.variants)) {
+        payload.variants.forEach((variant, index) => {
+          appendVariantRow(form, variant, index)
+        })
+      }
+
+      if (payload.photo instanceof File) {
+        form.append('photo', payload.photo)
+      }
+
       const config = { headers: { 'Content-Type': 'multipart/form-data' } }
       if (id) {
         form.append('_method', 'PUT')

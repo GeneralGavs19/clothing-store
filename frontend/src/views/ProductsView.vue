@@ -3,7 +3,7 @@
     <section class="panel p-4">
       <div class="flex flex-col gap-3">
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <input v-model="filters.search" class="input" placeholder="Поиск по названию, коду, штрихкоду или размеру" @input="debouncedFetch" />
+          <input v-model="filters.search" class="input" placeholder="Поиск по названию, цвету, размеру или коду единицы" @input="debouncedFetch" />
           <select v-model="filters.category_id" class="select" @change="fetchProducts(1)">
             <option value="">Все категории</option>
             <option v-for="category in catalog.categories" :key="category.id" :value="category.id">{{ category.name }}</option>
@@ -39,28 +39,24 @@
       <div v-else class="divide-y divide-slate-200 dark:divide-slate-800">
         <article v-for="product in catalog.products" :key="product.id" class="product-row">
           <div class="flex min-w-0 flex-1 items-start gap-3">
-            <button
-              type="button"
+            <RouterLink
+              :to="{ name: 'product-detail', params: { id: product.id } }"
               class="h-14 w-14 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800"
-              @click="detail = product"
             >
               <img v-if="product.photo_url" :src="photoUrl(product.photo_url)" class="h-full w-full object-cover" :alt="product.name" loading="lazy" />
               <div v-else class="flex h-full w-full items-center justify-center">
                 <Package class="h-5 w-5 text-slate-400" />
               </div>
-            </button>
-            <button type="button" class="min-w-0 flex-1 text-left" @click="detail = product">
+            </RouterLink>
+            <RouterLink :to="{ name: 'product-detail', params: { id: product.id } }" class="min-w-0 flex-1 text-left">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-medium leading-snug">{{ product.name }}</span>
                 <span class="badge shrink-0" :class="statusClass(product.status)">{{ statusLabel(product.status) }}</span>
               </div>
               <p class="mt-1 text-xs leading-relaxed text-slate-500">
-                код {{ product.sku }}
-                <span v-if="product.barcode"> · штрихкод {{ product.barcode }}</span>
-                <span v-if="product.size"> · размер {{ product.size }}</span>
-                · {{ product.category?.name || 'Без категории' }}
+                {{ variantSummaryLine(product) }}
               </p>
-            </button>
+            </RouterLink>
           </div>
           <div class="product-row__aside">
             <div class="min-w-0">
@@ -69,7 +65,7 @@
             </div>
             <div class="flex shrink-0 items-center gap-1.5">
               <button
-                v-if="auth.canManageCatalog && product.stock_quantity > 0"
+                v-if="auth.canManageCatalog && pickVariantForTransfer(product, 'stock_to_display')"
                 type="button"
                 class="btn-icon"
                 title="В магазин (1 шт.)"
@@ -78,7 +74,7 @@
                 <ArrowRightLeft class="h-4 w-4" />
               </button>
               <button
-                v-if="auth.canManageCatalog && product.display_quantity > 0"
+                v-if="auth.canManageCatalog && pickVariantForTransfer(product, 'display_to_stock')"
                 type="button"
                 class="btn-icon"
                 title="На склад (1 шт.)"
@@ -86,9 +82,9 @@
               >
                 <ArrowRightLeft class="h-4 w-4" />
               </button>
-              <button type="button" class="btn-icon" title="Карточка" @click="detail = product">
+              <RouterLink :to="{ name: 'product-detail', params: { id: product.id } }" class="btn-icon" title="Карточка">
                 <Eye class="h-4 w-4" />
-              </button>
+              </RouterLink>
               <button v-if="auth.canManageCatalog" type="button" class="btn-icon" title="Редактировать" @click="openEdit(product)">
                 <Pencil class="h-4 w-4" />
               </button>
@@ -115,12 +111,16 @@
           <input v-model="form.name" class="input" required />
         </label>
         <label class="block">
-          <span class="mb-1 block text-sm font-medium">Код товара</span>
-          <input v-model="form.sku" class="input" placeholder="Необязательно. Например: SAM-GAL-001" />
+          <span class="mb-1 block text-sm font-medium">Цвет</span>
+          <input v-model="form.color" class="input" placeholder="Синий, чёрный…" />
         </label>
         <label class="block">
-          <span class="mb-1 block text-sm font-medium">Штрихкод</span>
-          <input v-model="form.barcode" class="input" placeholder="Необязательно. Сгенерируется автоматически" />
+          <span class="mb-1 block text-sm font-medium">Бренд (необязательно)</span>
+          <input v-model="form.brand" class="input" placeholder="Nike…" />
+        </label>
+        <label class="block sm:col-span-2">
+          <span class="mb-1 block text-sm font-medium">Базовая цена (необязательно)</span>
+          <input v-model.number="form.base_sale_price" class="input" type="number" min="0" step="0.01" />
         </label>
         <label class="block sm:col-span-2">
           <span class="mb-1 block text-sm font-medium">Категория</span>
@@ -129,45 +129,83 @@
             <option v-for="category in catalog.categories" :key="category.id" :value="category.id">{{ category.name }}</option>
           </select>
         </label>
-        <label class="block sm:col-span-2">
-          <span class="mb-1 block text-sm font-medium">Цена продажи</span>
-          <input v-model.number="form.sale_price" class="input" type="number" min="0" step="0.01" required />
-        </label>
-        <div class="block sm:col-span-2">
-          <div class="mb-1 flex items-center justify-between gap-2">
-            <span class="text-sm font-medium">Размеры и количество</span>
-            <button type="button" class="btn-muted h-8 px-3" @click="addVariantRow">+ Добавить размер</button>
-          </div>
-          <div class="space-y-2 rounded-md border border-slate-200 p-3 dark:border-slate-800">
-            <div class="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 text-xs text-slate-500">
-              <span>Размер</span>
-              <span>На складе</span>
-              <span>В магазине</span>
-              <span />
-            </div>
-            <div v-for="(variant, index) in form.variants" :key="`variant-${index}`" class="grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
-              <input v-model="variant.size" class="input" placeholder="Например: 98, 100, XL" />
-              <input v-model.number="variant.stock_quantity" class="input" type="number" min="0" />
-              <input v-model.number="variant.display_quantity" class="input" type="number" min="0" />
-              <button type="button" class="btn-muted h-10 px-3" :disabled="form.variants.length === 1" @click="removeVariantRow(index)">
-                ×
-              </button>
+
+        <div ref="variantTableRef" class="block sm:col-span-2 overflow-x-auto rounded-md border border-slate-200 dark:border-slate-800">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+            <span class="text-sm font-medium">Варианты</span>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="btn-muted h-8 px-2 text-xs" @click="quickAddSizesPrompt">Размеры…</button>
+              <button type="button" class="btn-muted h-8 px-2 text-xs" @click="duplicateLastVariant">Дублировать строку</button>
+              <button type="button" class="btn-primary h-8 px-2 text-xs" @click="addVariantRow">+ Вариант</button>
             </div>
           </div>
+          <table class="min-w-[40rem] w-full border-collapse text-sm">
+            <thead>
+              <tr class="border-b border-slate-200 bg-white text-left text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-950">
+                <th class="whitespace-nowrap px-2 py-2 font-medium">Размер</th>
+                <th class="whitespace-nowrap px-2 py-2 font-medium">Кол-во</th>
+                <th class="whitespace-nowrap px-2 py-2 font-medium">На складе</th>
+                <th class="whitespace-nowrap px-2 py-2 font-medium">Порог</th>
+                <th class="whitespace-nowrap px-2 py-2 font-medium">Цена</th>
+                <th class="whitespace-nowrap px-2 py-2 font-medium">Себест.</th>
+                <th class="w-10 px-1 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(variant, index) in form.variants"
+                :key="`variant-${index}-${variant.id ?? 'n'}`"
+                :class="variantRowClass(variant)"
+              >
+                <td class="px-1 py-1 align-middle">
+                  <input
+                    v-model="variant.size"
+                    class="input h-9 px-2 text-sm tabular-nums"
+                    placeholder="S"
+                    data-variant-focus="size"
+                    @keydown.enter.prevent="addVariantRow"
+                  />
+                </td>
+                <td class="px-1 py-1 align-middle">
+                  <input v-model.number="variant.quantity" class="input h-9 px-2 tabular-nums" type="number" min="0" step="1" title="Единиц в магазине (коды создадутся автоматически)" />
+                </td>
+                <td class="px-1 py-1 align-middle">
+                  <input v-model.number="variant.stock_warehouse" class="input h-9 px-2 tabular-nums" type="number" min="0" step="1" placeholder="0" />
+                </td>
+                <td class="px-1 py-1 align-middle">
+                  <input v-model.number="variant.low_stock_threshold" class="input h-9 px-2 tabular-nums" type="number" min="0" step="1" />
+                </td>
+                <td class="px-1 py-1 align-middle">
+                  <input v-model.number="variant.sale_price" class="input h-9 px-2 tabular-nums" type="number" min="0" step="0.01" required />
+                </td>
+                <td class="px-1 py-1 align-middle">
+                  <input v-model="variant.purchase_price" class="input h-9 px-2 tabular-nums" type="number" min="0" step="0.01" placeholder="—" />
+                </td>
+                <td class="px-1 py-1 align-middle text-right">
+                  <button type="button" class="btn-muted h-9 w-9 shrink-0 px-0" title="Копировать строку" @click="copyVariantRow(index)">
+                    <Copy class="h-4 w-4" />
+                  </button>
+                  <button type="button" class="btn-muted h-9 w-9 shrink-0 px-0" :disabled="form.variants.length === 1" @click="removeVariantRow(index)">
+                    ×
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="border-t border-slate-200 px-3 py-2 text-xs text-slate-500 dark:border-slate-800">
+            Укажите размер и количество — система создаст нужное число единиц с уникальными кодами. «На складе» — опционально.
+          </p>
         </div>
+
         <label class="block">
-          <span class="mb-1 block text-sm font-medium">В магазине (авто)</span>
-          <input :value="displayFromVariants" class="input bg-slate-50 dark:bg-slate-900" type="number" disabled />
+          <span class="mb-1 block text-sm font-medium">Всего на складе (авто)</span>
+          <input :value="warehouseTotal" class="input bg-slate-50 dark:bg-slate-900" type="number" disabled />
         </label>
         <label class="block">
-          <span class="mb-1 block text-sm font-medium">На складе (авто)</span>
-          <input :value="stockFromVariants" class="input bg-slate-50 dark:bg-slate-900" type="number" disabled />
+          <span class="mb-1 block text-sm font-medium">Всего в магазине (авто)</span>
+          <input :value="storeTotal" class="input bg-slate-50 dark:bg-slate-900" type="number" disabled />
         </label>
-        <label class="block sm:col-span-2">
-          <span class="mb-1 block text-sm font-medium">Порог остатка</span>
-          <p class="mb-1 text-xs text-slate-500">Если сумма склада и магазина ≤ порога — товар в «Низкий остаток»</p>
-          <input v-model.number="form.low_stock_threshold" class="input" type="number" min="0" />
-        </label>
+
         <label class="block sm:col-span-2">
           <span class="mb-1 block text-sm font-medium">Фото</span>
           <input class="input py-2" type="file" accept="image/*" @change="form.photo = $event.target.files[0]" />
@@ -185,52 +223,14 @@
       </form>
     </ModalPanel>
 
-    <ModalPanel :open="!!detail" title="Карточка товара" @close="detail = null">
-      <div v-if="detail" class="space-y-4">
-        <div class="flex flex-col gap-4 sm:flex-row">
-          <div class="mx-auto h-24 w-24 shrink-0 overflow-hidden rounded-lg bg-slate-100 sm:mx-0 dark:bg-slate-900">
-            <img v-if="detail.photo_url" :src="photoUrl(detail.photo_url)" class="h-full w-full object-cover" alt="" />
-            <Package v-else class="m-8 h-8 w-8 text-slate-400" />
-          </div>
-          <div class="min-w-0 text-center sm:text-left">
-            <h2 class="text-xl font-semibold">{{ detail.name }}</h2>
-            <p class="text-sm text-slate-500">Код: {{ detail.sku }}</p>
-            <p class="text-sm text-slate-500">Штрихкод: {{ detail.barcode || '—' }}</p>
-            <p v-if="detail.size" class="text-sm text-slate-500">Размеры: {{ detail.size }}</p>
-            <p class="mt-2 text-sm">{{ detail.category?.name || 'Без категории' }}</p>
-          </div>
-        </div>
-        <div v-if="detail.variants?.length" class="space-y-2">
-          <h3 class="text-sm font-medium">Варианты</h3>
-          <div class="overflow-hidden rounded-md border border-slate-200 dark:border-slate-800">
-            <div class="grid grid-cols-2 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-900">
-              <span>Размер</span>
-              <span>Склад / Магазин</span>
-            </div>
-            <div v-for="(variant, index) in detail.variants" :key="`detail-variant-${index}`" class="grid grid-cols-2 px-3 py-2 text-sm">
-              <span>{{ variant.size }}</span>
-              <span>{{ variant.stock_quantity ?? variant.quantity ?? 0 }} / {{ variant.display_quantity ?? 0 }}</span>
-            </div>
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <Info label="Цена" :value="money(detail.sale_price)" />
-          <Info label="Склад" :value="detail.stock_quantity" />
-          <Info label="В магазине" :value="detail.display_quantity" />
-          <Info label="Общий остаток" :value="detail.total_quantity" />
-          <Info label="Порог остатка" :value="detail.low_stock_threshold" />
-          <Info label="Обновлён" :value="date(detail.updated_at)" />
-        </div>
-        <p v-if="detail.description" class="text-sm text-slate-600 dark:text-slate-300">{{ detail.description }}</p>
-      </div>
-    </ModalPanel>
-
     <ModalPanel :open="importOpen" title="Импорт товаров (CSV)" @close="importOpen = false">
       <form class="grid grid-cols-1 gap-4" @submit.prevent="importProducts">
         <p class="text-sm text-slate-500">
-          Формат колонок: <b>name, sku, size, sale_price, stock_quantity, display_quantity, low_stock_threshold, description</b>.
-          Можно также с barcode: <b>name, sku, barcode, size, sale_price, stock_quantity, display_quantity, low_stock_threshold, description</b>.
-          Разделитель — запятая или точка с запятой. Первая строка может быть заголовком.
+          Каждая строка — один товар с одним вариантом. Полный формат (11+ колонок):
+          <b>name, sku, barcode, color, size, price, stock_warehouse, stock_store, low_stock_threshold, purchase_price, description</b>.
+          Короткий формат с штрихкодом:
+          <b>name, sku, barcode, size, price, stock_warehouse, stock_store, low_stock_threshold, description</b>.
+          Разделитель — запятая или точка с запятой; первая строка может быть заголовком.
         </p>
         <label class="block">
           <span class="mb-1 block text-sm font-medium">Категория для всех товаров (необязательно)</span>
@@ -255,9 +255,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { ArrowRightLeft, Eye, LoaderCircle, Pencil, Plus, X } from 'lucide-vue-next'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
+import { ArrowRightLeft, Copy, Eye, LoaderCircle, Pencil, Plus, X } from 'lucide-vue-next'
 import { createIcon, icons } from '../plugins/icons'
 import { apiError } from '../api/client'
 import { resolveApiOrigin } from '../config/api'
@@ -280,7 +280,7 @@ const importOpen = ref(false)
 const saving = ref(false)
 const importing = ref(false)
 const editing = ref(null)
-const detail = ref(null)
+const variantTableRef = ref(null)
 const filters = reactive({ search: '', category_id: '', status: '', sort: 'updated_at', direction: 'desc', page: 1, per_page: 12 })
 const form = reactive(emptyForm())
 const importForm = reactive({ category_id: '', file: null })
@@ -288,27 +288,71 @@ let debounce
 
 const apiBase = computed(() => resolveApiOrigin())
 
+function blankVariant() {
+  return {
+    id: null,
+    size: '',
+    quantity: 0,
+    stock_warehouse: 0,
+    low_stock_threshold: 0,
+    sale_price: 0,
+    purchase_price: '',
+  }
+}
+
 function emptyForm() {
   return {
     name: '',
-    sku: '',
-    barcode: '',
-    size: '',
-    variants: [{ size: '', stock_quantity: 0, display_quantity: 0 }],
+    color: '',
+    brand: '',
+    base_sale_price: '',
+    variants: [blankVariant()],
     category_id: '',
     description: '',
-    sale_price: 0,
-    stock_quantity: 0,
-    display_quantity: 0,
-    low_stock_threshold: 0,
     photo: null,
   }
 }
 
+function normalizeVariantsFromProduct(product, rawVariants) {
+  const list = Array.isArray(rawVariants) ? rawVariants : []
+  if (list.length) {
+    return list.map((v) => ({
+      id: v.id ?? null,
+      size: String(v.size || '').trim(),
+      quantity: Math.max(0, Number(v.stock_store ?? v.display_quantity ?? v.quantity ?? 0)),
+      stock_warehouse: Math.max(0, Number(v.stock_warehouse ?? v.stock_quantity ?? 0)),
+      low_stock_threshold: Math.max(0, Number(v.low_stock_threshold ?? 0)),
+      sale_price: Math.max(0, Number(v.sale_price ?? 0)),
+      purchase_price: v.purchase_price != null && v.purchase_price !== '' ? Number(v.purchase_price) : '',
+    }))
+  }
+  const fbSize = String(product?.size || '').trim()
+  if (fbSize) {
+    return [
+      {
+        ...blankVariant(),
+        size: fbSize,
+        stock_warehouse: Math.max(0, Number(product?.stock_quantity ?? 0)),
+        stock_store: Math.max(0, Number(product?.display_quantity ?? 0)),
+        sale_price: Math.max(0, Number(product?.sale_price ?? 0)),
+      },
+    ]
+  }
+  return [blankVariant()]
+}
+
 function resetForm(product = null) {
-  Object.assign(form, emptyForm(), product || {})
-  form.variants = normalizeVariants(product?.variants, product?.size, product?.stock_quantity)
-  form.stock_quantity = stockFromVariantList(form.variants)
+  const base = emptyForm()
+  Object.assign(form, base)
+  if (product) {
+    form.name = product.name ?? ''
+    form.color = product.color ?? ''
+    form.brand = product.brand ?? ''
+    form.base_sale_price = product.base_sale_price != null ? product.base_sale_price : ''
+    form.category_id = product.category_id ?? ''
+    form.description = product.description ?? ''
+  }
+  form.variants = normalizeVariantsFromProduct(product, product?.variants)
   form.photo = null
 }
 
@@ -344,16 +388,35 @@ function debouncedFetch() {
   debounce = window.setTimeout(() => fetchProducts(1), 300)
 }
 
+function prepareVariantsForSave(rows) {
+  return (rows || [])
+    .map((v) => ({
+      id: v.id,
+      size: String(v.size || '').trim(),
+      quantity: Math.max(0, Number(v.quantity ?? 0)),
+      stock_warehouse: Math.max(0, Number(v.stock_warehouse ?? 0)),
+      stock_store: Math.max(0, Number(v.quantity ?? 0)),
+      low_stock_threshold: Math.max(0, Number(v.low_stock_threshold ?? 0)),
+      sale_price: Math.max(0, Number(v.sale_price ?? 0)),
+      purchase_price: v.purchase_price === '' || v.purchase_price == null ? '' : Math.max(0, Number(v.purchase_price)),
+    }))
+    .filter((v) => v.size)
+}
+
 async function saveProduct() {
   saving.value = true
   try {
-    const variants = normalizeVariants(form.variants)
-    if (!variants.length) throw new Error('Добавьте хотя бы один размер.')
+    const variants = prepareVariantsForSave(form.variants)
+    if (!variants.length) throw new Error('Добавьте хотя бы один вариант с размером.')
     const payload = {
-      ...form,
+      name: form.name,
+      color: form.color,
+      brand: form.brand,
+      base_sale_price: form.base_sale_price,
+      category_id: form.category_id,
+      description: form.description,
       variants,
-      stock_quantity: stockFromVariantList(variants),
-      display_quantity: displayFromVariantList(variants),
+      photo: form.photo,
     }
     await catalog.saveProduct(payload, editing.value?.id)
     toast.push('Товар сохранен')
@@ -366,10 +429,24 @@ async function saveProduct() {
   }
 }
 
+function pickVariantForTransfer(product, direction) {
+  const variants = Array.isArray(product?.variants) ? product.variants : []
+  if (direction === 'stock_to_display') {
+    return variants.find((v) => Number(v.stock_warehouse ?? v.stock_quantity ?? 0) > 0) ?? null
+  }
+  return variants.find((v) => Number(v.stock_store ?? v.display_quantity ?? 0) > 0) ?? null
+}
+
 async function moveToStore(product) {
+  const v = pickVariantForTransfer(product, 'stock_to_display')
+  if (!v?.id) {
+    toast.push('Нет остатка на складе ни у одного варианта', 'error')
+    return
+  }
   try {
     await catalog.transferStock({
       product_id: product.id,
+      product_variant_id: v.id,
       quantity: 1,
       direction: 'stock_to_display',
       note: 'Перенос в магазин',
@@ -382,9 +459,15 @@ async function moveToStore(product) {
 }
 
 async function moveToStock(product) {
+  const v = pickVariantForTransfer(product, 'display_to_stock')
+  if (!v?.id) {
+    toast.push('Нет остатка в магазине ни у одного варианта', 'error')
+    return
+  }
   try {
     await catalog.transferStock({
       product_id: product.id,
+      product_variant_id: v.id,
       quantity: 1,
       direction: 'display_to_stock',
       note: 'Возврат на склад',
@@ -411,41 +494,98 @@ async function importProducts() {
   }
 }
 
-const stockFromVariants = computed(() => stockFromVariantList(form.variants))
-const displayFromVariants = computed(() => displayFromVariantList(form.variants))
+const warehouseTotal = computed(() =>
+  (form.variants || []).reduce((s, v) => s + Math.max(0, Number(v.stock_warehouse ?? 0)), 0),
+)
+const storeTotal = computed(() =>
+  (form.variants || []).reduce((s, v) => s + Math.max(0, Number(v.quantity ?? v.stock_store ?? 0)), 0),
+)
 
-function normalizeVariants(rawVariants, fallbackSize = '', fallbackQty = 0) {
-  if (Array.isArray(rawVariants)) {
-    const prepared = rawVariants
-      .map((variant) => ({
-        size: String(variant?.size || '').trim(),
-        stock_quantity: Math.max(0, Number(variant?.stock_quantity ?? variant?.quantity ?? 0)),
-        display_quantity: Math.max(0, Number(variant?.display_quantity || 0)),
-      }))
-      .filter((variant) => variant.size)
-    if (prepared.length) return prepared
+function variantStockTotal(variant) {
+  return Math.max(0, Number(variant.stock_warehouse ?? 0)) + Math.max(0, Number(variant.quantity ?? variant.stock_store ?? 0))
+}
+
+function variantRowClass(variant) {
+  const th = Math.max(0, Number(variant.low_stock_threshold ?? 0))
+  const t = variantStockTotal(variant)
+  if (th > 0 && t > 0 && t <= th) {
+    return 'bg-amber-50 ring-1 ring-amber-100 dark:bg-amber-950/30 dark:ring-amber-900/50'
   }
-  if (String(fallbackSize || '').trim()) {
-    return [{ size: String(fallbackSize).trim(), stock_quantity: Math.max(0, Number(fallbackQty || 0)), display_quantity: 0 }]
-  }
-  return [{ size: '', stock_quantity: 0, display_quantity: 0 }]
+  return ''
 }
 
-function stockFromVariantList(list) {
-  return (list || []).reduce((sum, variant) => sum + Math.max(0, Number(variant?.stock_quantity ?? variant?.quantity ?? 0)), 0)
+function detailVariantRowClass(variant) {
+  return variantRowClass(variant)
 }
 
-function displayFromVariantList(list) {
-  return (list || []).reduce((sum, variant) => sum + Math.max(0, Number(variant?.display_quantity || 0)), 0)
+function variantSummaryLine(product) {
+  const parts = []
+  if (product.color) parts.push(product.color)
+  const vars = product.variants || []
+  const sizes = vars.map((v) => v.size).filter(Boolean)
+  if (sizes.length) parts.push(`размеры: ${sizes.slice(0, 6).join(', ')}${sizes.length > 6 ? '…' : ''}`)
+  else if (product.size) parts.push(`размеры: ${product.size}`)
+  const total = Number(product.total_quantity ?? 0)
+  if (total) parts.push(`${total} ед.`)
+  parts.push(product.category?.name || 'Без категории')
+  return parts.join(' · ')
 }
 
-function addVariantRow() {
-  form.variants.push({ size: '', stock_quantity: 0, display_quantity: 0 })
+async function addVariantRow() {
+  form.variants.push(blankVariant())
+  await nextTick()
+  const root = variantTableRef.value
+  if (!root) return
+  const inputs = root.querySelectorAll('input[data-variant-focus="size"]')
+  const last = inputs[inputs.length - 1]
+  last?.focus?.()
 }
 
 function removeVariantRow(index) {
   form.variants.splice(index, 1)
-  if (!form.variants.length) addVariantRow()
+  if (!form.variants.length) form.variants.push(blankVariant())
+}
+
+function copyVariantRow(index) {
+  const row = form.variants[index]
+  if (!row) return
+  const copy = {
+    ...blankVariant(),
+    ...JSON.parse(JSON.stringify(row)),
+    id: null,
+  }
+  form.variants.splice(index + 1, 0, copy)
+  nextTick().then(() => {
+    const root = variantTableRef.value
+    const inputs = root?.querySelectorAll('input[data-variant-focus="size"]') || []
+    inputs[index + 1]?.focus?.()
+  })
+}
+
+function duplicateLastVariant() {
+  const last = form.variants[form.variants.length - 1]
+  if (!last) return
+  copyVariantRow(form.variants.length - 1)
+}
+
+function quickAddSizesPrompt() {
+  const raw = window.prompt('Размеры и количество: S:5, M:4, L:4 или S, M, L (по 1 шт.)', '')
+  if (!raw) return
+  const template = form.variants[form.variants.length - 1] || blankVariant()
+  const chunks = raw.split(/[,;]+/).map((s) => s.trim()).filter(Boolean)
+  for (const chunk of chunks) {
+    const m = chunk.match(/^(.+?)\s*[:=]\s*(\d+)$/u)
+    const size = (m ? m[1] : chunk).trim()
+    const qty = m ? Math.max(0, parseInt(m[2], 10)) : Math.max(0, Number(template.quantity) || 1)
+    if (!size) continue
+    form.variants.push({
+      ...blankVariant(),
+      ...JSON.parse(JSON.stringify(template)),
+      id: null,
+      size,
+      quantity: qty,
+    })
+  }
 }
 
 function photoUrl(path) {
@@ -490,10 +630,22 @@ function statusClass(status) {
   }[status]
 }
 
+async function openEditFromRoute() {
+  const editId = route.query.edit
+  if (!editId) return
+  try {
+    const p = await catalog.fetchProduct(editId)
+    if (p) openEdit(p)
+  } catch {
+    //
+  }
+}
+
 onMounted(async () => {
   await catalog.fetchCategories()
   applyRouteFilters()
-  fetchProducts()
+  await fetchProducts()
+  await openEditFromRoute()
 })
 
 async function confirmDelete(product) {

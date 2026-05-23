@@ -4,8 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Models\ProductItem;
+use App\Models\ProductVariant;
 use App\Models\StockMovement;
 use App\Services\ActivityLogger;
+use App\Services\ProductItemService;
 use App\Support\ApiPagination;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -28,41 +31,44 @@ class StockController extends Controller
         return response()->json(ApiPagination::format($query->paginate($request->integer('per_page', 20))));
     }
 
-    public function transfer(Request $request, ActivityLogger $logger)
+    public function transfer(Request $request, ActivityLogger $logger, ProductItemService $itemService)
     {
         $data = $request->validate([
             'product_id' => ['required', 'exists:products,id'],
+            'product_variant_id' => ['required', 'exists:product_variants,id'],
             'quantity' => ['required', 'integer', 'min:1'],
             'direction' => ['required', Rule::in(['stock_to_display', 'display_to_stock'])],
             'note' => ['nullable', 'string', 'max:1000'],
         ]);
 
         $movement = DB::transaction(function () use ($request, $data) {
-            $product = Product::query()->lockForUpdate()->findOrFail($data['product_id']);
-            $variants = $this->normalizeVariants($product);
+            $variant = ProductVariant::query()->lockForUpdate()->findOrFail($data['product_variant_id']);
 
-            if ($data['direction'] === 'stock_to_display') {
-                if ($product->stock_quantity < $data['quantity']) {
-                    throw ValidationException::withMessages(['quantity' => 'Недостаточно товара на складе.']);
-                }
-                $product->stock_quantity -= $data['quantity'];
-                $product->display_quantity += $data['quantity'];
-                $this->moveVariantQuantity($variants, $data['quantity'], 'stock_quantity', 'display_quantity');
-                $from = 'stock';
-                $to = 'display';
-            } else {
-                if ($product->display_quantity < $data['quantity']) {
-                    throw ValidationException::withMessages(['quantity' => 'Недостаточно товара на витрине.']);
-                }
-                $product->display_quantity -= $data['quantity'];
-                $product->stock_quantity += $data['quantity'];
-                $this->moveVariantQuantity($variants, $data['quantity'], 'display_quantity', 'stock_quantity');
-                $from = 'display';
-                $to = 'stock';
+            if ((int) $variant->product_id !== (int) $data['product_id']) {
+                throw ValidationException::withMessages(['product_variant_id' => 'Вариант не принадлежит этому товару.']);
             }
 
-            $product->variants = $variants;
-            $product->refreshStatus();
+            $qty = $data['quantity'];
+
+            if ($data['direction'] === 'stock_to_display') {
+                if ($variant->stock_warehouse < $qty) {
+                    throw ValidationException::withMessages(['quantity' => 'Недостаточно товара на складе.']);
+                }
+                $from = ProductItem::LOCATION_STOCK;
+                $to = ProductItem::LOCATION_DISPLAY;
+            } else {
+                if ($variant->stock_store < $qty) {
+                    throw ValidationException::withMessages(['quantity' => 'Недостаточно товара в магазине.']);
+                }
+                $from = ProductItem::LOCATION_DISPLAY;
+                $to = ProductItem::LOCATION_STOCK;
+            }
+
+            $itemService->transferItems($variant, $qty, $from, $to);
+            $variant->refresh();
+
+            $product = Product::query()->lockForUpdate()->findOrFail($data['product_id']);
+            $product->applyAggregatesFromVariants();
             $product->save();
 
             return StockMovement::create([
@@ -71,7 +77,7 @@ class StockController extends Controller
                 'type' => 'transfer',
                 'from_location' => $from,
                 'to_location' => $to,
-                'quantity' => $data['quantity'],
+                'quantity' => $qty,
                 'stock_after' => $product->stock_quantity,
                 'display_after' => $product->display_quantity,
                 'note' => isset($data['note']) ? strip_tags($data['note']) : null,
@@ -94,7 +100,6 @@ class StockController extends Controller
 
         $movement = DB::transaction(function () use ($request, $data) {
             $product = Product::query()->lockForUpdate()->findOrFail($data['product_id']);
-            $variants = $this->normalizeVariants($product);
             $stockDelta = (int) ($data['stock_delta'] ?? 0);
             $displayDelta = (int) ($data['display_delta'] ?? 0);
 
@@ -105,12 +110,20 @@ class StockController extends Controller
                 throw ValidationException::withMessages(['quantity' => 'Остатки не могут быть отрицательными.']);
             }
 
-            $product->stock_quantity += $stockDelta;
-            $product->display_quantity += $displayDelta;
-            $this->applyVariantDelta($variants, $stockDelta, 'stock_quantity');
-            $this->applyVariantDelta($variants, $displayDelta, 'display_quantity');
-            $product->variants = $variants;
-            $product->refreshStatus();
+            $variants = ProductVariant::query()
+                ->where('product_id', $product->id)
+                ->lockForUpdate()
+                ->orderBy('position')
+                ->orderBy('id')
+                ->get();
+
+            $this->applyVariantDelta($variants, $stockDelta, 'stock_warehouse');
+            $this->applyVariantDelta($variants, $displayDelta, 'stock_store');
+            foreach ($variants as $v) {
+                $v->save();
+            }
+
+            $product->applyAggregatesFromVariants();
             $product->save();
 
             return StockMovement::create([
@@ -131,63 +144,26 @@ class StockController extends Controller
         return response()->json($movement->load('product'));
     }
 
-    private function normalizeVariants(Product $product): array
+    private function applyVariantDelta($variants, int $delta, string $column): void
     {
-        $variants = is_array($product->variants) ? $product->variants : [];
-        if (empty($variants)) {
-            return [[
-                'size' => $product->size ?: 'Без размера',
-                'stock_quantity' => (int) $product->stock_quantity,
-                'display_quantity' => (int) $product->display_quantity,
-            ]];
-        }
-        return array_map(function ($variant) {
-            return [
-                'size' => trim((string) ($variant['size'] ?? 'Без размера')),
-                'stock_quantity' => max(0, (int) ($variant['stock_quantity'] ?? $variant['quantity'] ?? 0)),
-                'display_quantity' => max(0, (int) ($variant['display_quantity'] ?? 0)),
-            ];
-        }, $variants);
-    }
-
-    private function moveVariantQuantity(array &$variants, int $quantity, string $fromKey, string $toKey): void
-    {
-        $left = $quantity;
-        foreach ($variants as &$variant) {
-            if ($left <= 0) {
-                break;
-            }
-            $available = (int) ($variant[$fromKey] ?? 0);
-            if ($available <= 0) {
-                continue;
-            }
-            $move = min($available, $left);
-            $variant[$fromKey] = $available - $move;
-            $variant[$toKey] = (int) ($variant[$toKey] ?? 0) + $move;
-            $left -= $move;
-        }
-    }
-
-    private function applyVariantDelta(array &$variants, int $delta, string $key): void
-    {
-        if ($delta === 0 || empty($variants)) {
+        if ($delta === 0 || $variants->isEmpty()) {
             return;
         }
         if ($delta > 0) {
-            $variants[0][$key] = (int) ($variants[0][$key] ?? 0) + $delta;
+            $variants->first()->$column += $delta;
             return;
         }
         $left = abs($delta);
-        foreach ($variants as &$variant) {
+        foreach ($variants as $variant) {
             if ($left <= 0) {
                 break;
             }
-            $value = (int) ($variant[$key] ?? 0);
+            $value = (int) $variant->{$column};
             if ($value <= 0) {
                 continue;
             }
             $cut = min($value, $left);
-            $variant[$key] = $value - $cut;
+            $variant->{$column} = $value - $cut;
             $left -= $cut;
         }
     }

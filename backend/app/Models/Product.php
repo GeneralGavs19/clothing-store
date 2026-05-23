@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
 
 class Product extends Model
@@ -13,13 +14,12 @@ class Product extends Model
     protected $fillable = [
         'category_id',
         'name',
-        'sku',
-        'barcode',
-        'size',
-        'variants',
+        'brand',
+        'color',
         'photo_path',
         'description',
         'purchase_price',
+        'base_sale_price',
         'sale_price',
         'stock_quantity',
         'display_quantity',
@@ -30,18 +30,23 @@ class Product extends Model
 
     protected $casts = [
         'purchase_price' => 'decimal:2',
+        'base_sale_price' => 'decimal:2',
         'sale_price' => 'decimal:2',
         'stock_quantity' => 'integer',
         'display_quantity' => 'integer',
         'low_stock_threshold' => 'integer',
-        'variants' => 'array',
     ];
 
-    protected $appends = ['total_quantity', 'photo_url'];
+    protected $appends = ['total_quantity', 'photo_url', 'size'];
 
     public function category()
     {
         return $this->belongsTo(Category::class);
+    }
+
+    public function variants(): HasMany
+    {
+        return $this->hasMany(ProductVariant::class)->orderBy('position')->orderBy('id');
     }
 
     public function saleItems()
@@ -59,31 +64,75 @@ class Product extends Model
         return $this->photo_path ? Storage::url($this->photo_path) : null;
     }
 
+    /** Краткое перечисление размеров вариантов для подписи в списке. */
+    public function getSizeAttribute(): ?string
+    {
+        if ($this->relationLoaded('variants')) {
+            $sizes = $this->variants->pluck('size')->filter()->unique()->values()->take(8);
+
+            return $sizes->isEmpty() ? null : $sizes->implode(', ');
+        }
+
+        return ProductVariant::query()
+            ->where('product_id', $this->id)
+            ->orderBy('position')
+            ->orderBy('id')
+            ->pluck('size')
+            ->filter()
+            ->unique()
+            ->take(8)
+            ->implode(', ') ?: null;
+    }
+
+    public function applyAggregatesFromVariants(): void
+    {
+        $variants = ProductVariant::query()
+            ->where('product_id', $this->id)
+            ->orderBy('position')
+            ->orderBy('id')
+            ->get();
+
+        if ($variants->isEmpty()) {
+            $this->stock_quantity = 0;
+            $this->display_quantity = 0;
+            $this->sale_price = (float) ($this->base_sale_price ?? 0);
+            $this->status = 'out_of_stock';
+
+            return;
+        }
+
+        $this->stock_quantity = (int) $variants->sum('stock_warehouse');
+        $this->display_quantity = (int) $variants->sum('stock_store');
+
+        $prices = $variants->map(fn (ProductVariant $v) => (float) $v->sale_price)->filter(fn ($p) => $p > 0);
+        $this->sale_price = $prices->isEmpty()
+            ? (float) ($this->base_sale_price ?? (float) $variants->first()->sale_price)
+            : $prices->min();
+
+        $positiveThresholds = $variants->map(fn (ProductVariant $v) => (int) $v->low_stock_threshold)->filter(fn ($x) => $x >= 0);
+        $this->low_stock_threshold = $positiveThresholds->isEmpty()
+            ? 0
+            : (int) $positiveThresholds->min();
+
+        $this->refreshStatus();
+    }
+
     public function refreshStatus(): void
     {
-        $total = $this->total_quantity;
-        $this->status = match (true) {
-            $total === 0 => 'out_of_stock',
-            $total <= $this->low_stock_threshold => 'low_stock',
-            default => 'active',
-        };
-    }
+        $total = (int) $this->stock_quantity + (int) $this->display_quantity;
 
-    protected static function booted(): void
-    {
-        static::creating(function (Product $product) {
-            if (!$product->barcode) {
-                $product->barcode = self::generateUniqueBarcode();
-            }
-        });
-    }
+        if ($total <= 0) {
+            $this->status = 'out_of_stock';
 
-    private static function generateUniqueBarcode(): string
-    {
-        do {
-            $barcode = '28'.str_pad((string) random_int(1, 99999999999), 11, '0', STR_PAD_LEFT);
-        } while (self::query()->where('barcode', $barcode)->exists());
+            return;
+        }
 
-        return $barcode;
+        $anyLowVariant = ProductVariant::query()
+            ->where('product_id', $this->id)
+            ->whereRaw('(stock_warehouse + stock_store) <= low_stock_threshold')
+            ->whereRaw('(stock_warehouse + stock_store) > 0')
+            ->exists();
+
+        $this->status = $anyLowVariant ? 'low_stock' : 'active';
     }
 }

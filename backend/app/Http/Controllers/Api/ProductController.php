@@ -3,12 +3,17 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Category;
 use App\Models\Product;
+use App\Models\ProductItem;
+use App\Models\ProductVariant;
 use App\Services\ActivityLogger;
+use App\Services\ProductItemService;
 use App\Support\ApiPagination;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -16,14 +21,22 @@ class ProductController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Product::query()->with('category');
+        $query = Product::query()
+            ->with(['category', 'variants'])
+            ->withCount([
+                'variants as variants_count',
+            ]);
 
         if ($search = $request->string('search')->trim()->toString()) {
             $query->where(fn ($q) => $q->where('name', 'like', "%{$search}%")
-                ->orWhere('sku', 'like', "%{$search}%")
-                ->orWhere('barcode', 'like', "%{$search}%")
-                ->orWhere('size', 'like', "%{$search}%")
-                ->orWhere('description', 'like', "%{$search}%"));
+                ->orWhere('brand', 'like', "%{$search}%")
+                ->orWhere('description', 'like', "%{$search}%")
+                ->orWhere('color', 'like', "%{$search}%")
+                ->orWhereHas('variants', function ($vq) use ($search) {
+                    $vq->where('sku', 'like', "%{$search}%")
+                        ->orWhere('size', 'like', "%{$search}%")
+                        ->orWhereHas('items', fn ($iq) => $iq->where('code', 'like', "%{$search}%"));
+                }));
         }
 
         if ($request->filled('category_id')) {
@@ -35,12 +48,19 @@ class ProductController extends Controller
         }
 
         if ($request->boolean('low_stock')) {
-            $query->whereRaw('(stock_quantity + display_quantity) <= low_stock_threshold');
+            $query->where(function ($sub) {
+                $sub->whereRaw('(stock_quantity + display_quantity) <= COALESCE(low_stock_threshold, 0)')
+                    ->orWhereHas('variants', function ($vq) {
+                        $vq->whereRaw(
+                            '(stock_warehouse + stock_store) <= low_stock_threshold AND (stock_warehouse + stock_store) > 0'
+                        );
+                    });
+            });
         }
 
         $sort = $request->string('sort', 'updated_at')->toString();
         $direction = $request->string('direction', 'desc')->lower()->toString() === 'asc' ? 'asc' : 'desc';
-        $allowedSorts = ['name', 'sku', 'barcode', 'size', 'sale_price', 'stock_quantity', 'display_quantity', 'updated_at', 'created_at'];
+        $allowedSorts = ['name', 'sale_price', 'stock_quantity', 'display_quantity', 'updated_at', 'created_at'];
         $query->orderBy(in_array($sort, $allowedSorts, true) ? $sort : 'updated_at', $direction);
 
         return response()->json(ApiPagination::format($query->paginate($request->integer('per_page', 12))));
@@ -48,61 +68,98 @@ class ProductController extends Controller
 
     public function store(Request $request, ActivityLogger $logger)
     {
-        $data = $this->validated($request);
+        $product = DB::transaction(function () use ($request) {
+            $payload = $this->validatedProductAndVariants($request);
+            $variantRows = $payload['variants'];
+            unset($payload['variants']);
 
-        if ($request->hasFile('photo')) {
-            $data['photo_path'] = $request->file('photo')->store('products', 'public');
-        }
+            if ($request->hasFile('photo')) {
+                $payload['photo_path'] = $request->file('photo')->store('products', 'public');
+            }
 
-        $product = new Product($data + ['created_by' => $request->user()->id]);
-        $product->refreshStatus();
-        $product->save();
+            $product = new Product($payload + ['created_by' => $request->user()->id]);
+            $product->save();
 
-        $logger->log('products.created', $product, ['sku' => $product->sku], $request);
+            $this->syncVariants($product, $variantRows, $request, app(ProductItemService::class));
+            $product->applyAggregatesFromVariants();
+            $product->save();
 
-        return response()->json($product->load('category'), 201);
+            return $product;
+        });
+
+        $logger->log('products.created', $product, ['name' => $product->name], $request);
+
+        return response()->json($product->load(['category', 'variants']), 201);
     }
 
     public function show(Product $product)
     {
-        return response()->json($product->load(['category', 'saleItems.sale']));
+        $product->load([
+            'category',
+            'variants' => fn ($q) => $q->withCount([
+                'items as items_total',
+                'items as items_available' => fn ($iq) => $iq->where('status', ProductItem::STATUS_AVAILABLE),
+            ])->with(['items' => fn ($q) => $q->orderBy('status')->orderBy('location')->orderBy('code')]),
+        ]);
+
+        return response()->json($product);
+    }
+
+    public function lookupItem(string $code, ProductItemService $items)
+    {
+        $item = $items->findAvailableByCode($code);
+        if (! $item) {
+            return response()->json(['message' => 'Единица товара не найдена или уже продана.'], 404);
+        }
+
+        $item->load(['variant.product.category']);
+
+        return response()->json([
+            'item' => $item,
+            'variant' => $item->variant,
+            'product' => $item->variant?->product,
+        ]);
     }
 
     public function update(Request $request, Product $product, ActivityLogger $logger)
     {
-        $data = $this->validated($request, $product);
+        $product = DB::transaction(function () use ($request, $product) {
+            $payload = $this->validatedProductAndVariants($request, $product);
+            $variantRows = $payload['variants'];
+            unset($payload['variants']);
 
-        if ($request->hasFile('photo')) {
-            if ($product->photo_path) {
-                Storage::disk('public')->delete($product->photo_path);
+            if ($request->hasFile('photo')) {
+                if ($product->photo_path) {
+                    Storage::disk('public')->delete($product->photo_path);
+                }
+                $payload['photo_path'] = $request->file('photo')->store('products', 'public');
             }
-            $data['photo_path'] = $request->file('photo')->store('products', 'public');
-        }
 
-        $product->fill($data);
-        $product->refreshStatus();
-        $product->save();
+            $product->fill($payload);
 
-        $logger->log('products.updated', $product, ['sku' => $product->sku], $request);
+            $this->syncVariants($product, $variantRows, $request, app(ProductItemService::class));
+            $product->applyAggregatesFromVariants();
+            $product->save();
 
-        return response()->json($product->load('category'));
+            return $product;
+        });
+
+        $logger->log('products.updated', $product, ['name' => $product->name], $request);
+
+        return response()->json($product->load(['category', 'variants']));
     }
 
     public function destroy(Request $request, Product $product, ActivityLogger $logger)
     {
-        $product->load('category');
+        $product->load(['category', 'variants']);
         $hadSales = $product->saleItems()->exists();
 
         $meta = [
             'product_id' => $product->id,
             'name' => $product->name,
-            'sku' => $product->sku,
             'category' => $product->category?->name,
-            'size' => $product->size,
-            'sale_price' => (float) $product->sale_price,
-            'stock_quantity' => (int) $product->stock_quantity,
-            'display_quantity' => (int) $product->display_quantity,
             'had_sales' => $hadSales,
+            'variants' => $product->variants->map(fn ($v) => ['sku' => $v->sku, 'barcode' => $v->barcode])->values()->all(),
             'deleted_by' => $request->user()->only(['id', 'name', 'email', 'role']),
         ];
 
@@ -140,7 +197,7 @@ class ProductController extends Controller
             if (count($row) <= 1) {
                 $row = str_getcsv(implode('', $row), ',');
             }
-            if (!$row || !array_filter($row, fn ($value) => trim((string) $value) !== '')) {
+            if (! $row || ! array_filter($row, fn ($value) => trim((string) $value) !== '')) {
                 continue;
             }
             if ($lineNumber === 1 && str_contains(strtolower(implode(' ', $row)), 'name')) {
@@ -155,60 +212,85 @@ class ProductController extends Controller
         }
 
         $created = DB::transaction(function () use ($rows, $request, $data, $logger) {
+            $itemService = app(ProductItemService::class);
             $createdProducts = [];
+
             foreach ($rows as $index => $row) {
                 $name = strip_tags(trim((string) ($row[0] ?? '')));
-                $sku = strip_tags(trim((string) ($row[1] ?? '')));
-                $hasBarcode = count($row) >= 9;
-                $barcode = strip_tags(trim((string) ($hasBarcode ? ($row[2] ?? '') : '')));
-                $size = strip_tags(trim((string) ($hasBarcode ? ($row[3] ?? '') : ($row[2] ?? ''))));
-                $salePrice = (float) ($hasBarcode ? ($row[4] ?? 0) : ($row[3] ?? 0));
-                $stockQty = max(0, (int) ($hasBarcode ? ($row[5] ?? 0) : ($row[4] ?? 0)));
-                $displayQty = max(0, (int) ($hasBarcode ? ($row[6] ?? 0) : ($row[5] ?? 0)));
-                $threshold = isset($row[$hasBarcode ? 7 : 6]) ? max(0, (int) $row[$hasBarcode ? 7 : 6]) : 0;
-                $description = strip_tags(trim((string) ($row[$hasBarcode ? 8 : 7] ?? '')));
-
                 if ($name === '') {
                     throw ValidationException::withMessages([
                         'file' => 'Ошибка в строке '.($index + 1).': поле name обязательно.',
                     ]);
                 }
 
-                if ($sku !== '' && Product::query()->where('sku', $sku)->exists()) {
-                    throw ValidationException::withMessages([
-                        'file' => 'Ошибка в строке '.($index + 1).': артикул уже существует ('.$sku.').',
-                    ]);
+                // Опционально: name, sku, barcode, color, size, price, warehouse, store, threshold, purchase, description (+ brand можно первой колонкой расширить позже)
+                $wide = count($row) >= 11;
+                $sku = strip_tags(trim((string) ($row[1] ?? '')));
+                $barcode = strip_tags(trim((string) ($row[2] ?? '')));
+                $color = strip_tags(trim((string) ($row[3] ?? '')));
+                $size = strip_tags(trim((string) ($row[4] ?? '')));
+                $price = (float) ($row[5] ?? 0);
+                $wh = max(0, (int) ($row[6] ?? 0));
+                $st = max(0, (int) ($row[7] ?? 0));
+                $threshold = isset($row[8]) ? max(0, (int) $row[8]) : 0;
+                $purchase = isset($row[9]) ? (float) $row[9] : null;
+                $description = strip_tags(trim((string) ($row[10] ?? '')));
+
+                if (! $wide) {
+                    // legacy short: name, sku, barcode?, size, sale_price, stock, display, threshold, description
+                    $hasBarcode = count($row) >= 9;
+                    $sku = strip_tags(trim((string) ($row[1] ?? '')));
+                    $barcode = strip_tags(trim((string) ($hasBarcode ? ($row[2] ?? '') : '')));
+                    $color = '';
+                    $size = strip_tags(trim((string) ($hasBarcode ? ($row[3] ?? '') : ($row[2] ?? ''))));
+                    $price = (float) ($hasBarcode ? ($row[4] ?? 0) : ($row[3] ?? 0));
+                    $wh = max(0, (int) ($hasBarcode ? ($row[5] ?? 0) : ($row[4] ?? 0)));
+                    $st = max(0, (int) ($hasBarcode ? ($row[6] ?? 0) : ($row[5] ?? 0)));
+                    $threshold = isset($row[$hasBarcode ? 7 : 6]) ? max(0, (int) $row[$hasBarcode ? 7 : 6]) : 0;
+                    $purchase = null;
+                    $description = strip_tags(trim((string) ($row[$hasBarcode ? 8 : 7] ?? '')));
                 }
-                if ($barcode !== '' && Product::query()->where('barcode', $barcode)->exists()) {
-                    throw ValidationException::withMessages([
-                        'file' => 'Ошибка в строке '.($index + 1).': штрихкод уже существует ('.$barcode.').',
-                    ]);
-                }
+
+                $sizeFinal = $size !== '' ? $size : '—';
+
+                $category = isset($data['category_id'])
+                    ? Category::query()->find($data['category_id'])
+                    : null;
 
                 $product = new Product([
                     'category_id' => $data['category_id'] ?? null,
                     'name' => $name,
-                    'sku' => $sku !== '' ? $sku : null,
-                    'barcode' => $barcode !== '' ? $barcode : null,
-                    'size' => $size !== '' ? $size : null,
-                    'variants' => $size !== '' ? [[
-                        'size' => $size,
-                        'stock_quantity' => $stockQty,
-                        'display_quantity' => $displayQty,
-                    ]] : null,
+                    'color' => $color !== '' ? $color : null,
                     'description' => $description !== '' ? $description : null,
-                    'sale_price' => $salePrice,
-                    'stock_quantity' => $stockQty,
-                    'display_quantity' => $displayQty,
-                    'low_stock_threshold' => $threshold,
+                    'purchase_price' => $purchase ?? 0,
+                    'base_sale_price' => $price,
                     'created_by' => $request->user()->id,
                 ]);
-                $product->refreshStatus();
                 $product->save();
-                $createdProducts[] = $product;
 
-                $logger->log('products.imported', $product, ['sku' => $product->sku], $request);
+                $variantSku = $sku !== '' ? $sku : $this->proposeSku($category, $product->name, $sizeFinal);
+
+                $variant = ProductVariant::query()->create([
+                    'product_id' => $product->id,
+                    'size' => $sizeFinal,
+                    'sku' => $this->ensureUniqueSku($variantSku),
+                    'stock_warehouse' => 0,
+                    'stock_store' => 0,
+                    'low_stock_threshold' => $threshold,
+                    'sale_price' => $price,
+                    'purchase_price' => $purchase,
+                    'position' => 0,
+                ]);
+
+                $itemService->syncVariantInventory($variant, $wh, $st);
+
+                $product->applyAggregatesFromVariants();
+                $product->save();
+
+                $createdProducts[] = $product;
+                $logger->log('products.imported', $product, ['name' => $product->name], $request);
             }
+
             return $createdProducts;
         });
 
@@ -218,68 +300,46 @@ class ProductController extends Controller
         ], 201);
     }
 
-    private function validated(Request $request, ?Product $product = null): array
+    private function validatedProductAndVariants(Request $request, ?Product $product = null): array
     {
-        $rules = [
+        $productRules = [
             'category_id' => ['nullable', 'exists:categories,id'],
             'name' => [$product ? 'sometimes' : 'required', 'string', 'max:180'],
-            'sku' => [$product ? 'sometimes' : 'nullable', 'string', 'max:80', Rule::unique('products', 'sku')->ignore($product)],
-            'barcode' => [$product ? 'sometimes' : 'nullable', 'string', 'max:64', Rule::unique('products', 'barcode')->ignore($product)],
-            'size' => ['nullable', 'string', 'max:32'],
-            'variants' => ['nullable', 'array', 'min:1'],
-            'variants.*.size' => ['required_with:variants', 'string', 'max:32'],
-            'variants.*.quantity' => ['sometimes', 'integer', 'min:0'],
-            'variants.*.stock_quantity' => ['sometimes', 'integer', 'min:0'],
-            'variants.*.display_quantity' => ['sometimes', 'integer', 'min:0'],
+            'brand' => ['nullable', 'string', 'max:120'],
+            'color' => ['nullable', 'string', 'max:64'],
             'description' => ['nullable', 'string', 'max:3000'],
-            'sale_price' => [$product ? 'sometimes' : 'required', 'numeric', 'min:0'],
-            'stock_quantity' => ['sometimes', 'integer', 'min:0'],
-            'display_quantity' => ['sometimes', 'integer', 'min:0'],
-            'low_stock_threshold' => ['sometimes', 'integer', 'min:0'],
+            'purchase_price' => ['sometimes', 'numeric', 'min:0'],
+            'base_sale_price' => ['nullable', 'numeric', 'min:0'],
             'status' => ['sometimes', Rule::in(['active', 'low_stock', 'out_of_stock'])],
             'photo' => ['nullable', 'image', 'max:4096'],
+            'variants' => ['required', 'array', 'min:1'],
+            'variants.*.id' => ['nullable', 'integer', 'exists:product_variants,id'],
+            'variants.*.size' => ['required', 'string', 'max:64'],
+            'variants.*.quantity' => ['sometimes', 'integer', 'min:0'],
+            'variants.*.sku' => ['nullable', 'string', 'max:120'],
+            'variants.*.stock_warehouse' => ['sometimes', 'integer', 'min:0'],
+            'variants.*.stock_store' => ['sometimes', 'integer', 'min:0'],
+            'variants.*.low_stock_threshold' => ['sometimes', 'integer', 'min:0'],
+            'variants.*.sale_price' => ['required', 'numeric', 'min:0'],
+            'variants.*.purchase_price' => ['nullable', 'numeric', 'min:0'],
+            'variants.*.position' => ['sometimes', 'integer', 'min:0'],
         ];
 
-        $data = $request->validate($rules);
+        $data = $request->validate($productRules);
 
-        foreach (['name', 'sku', 'barcode', 'size', 'description'] as $field) {
+        foreach (['name', 'brand', 'color', 'description'] as $field) {
             if (isset($data[$field])) {
                 $data[$field] = strip_tags((string) $data[$field]);
             }
         }
 
-        if (array_key_exists('sku', $data) && trim((string) $data['sku']) === '') {
-            $data['sku'] = null;
-        }
-        if (array_key_exists('barcode', $data) && trim((string) $data['barcode']) === '') {
-            $data['barcode'] = null;
-        }
-
         if (isset($data['variants'])) {
-            $variants = $this->sanitizeVariants((array) $data['variants']);
-            if (empty($variants)) {
-                throw ValidationException::withMessages(['variants' => 'Добавьте хотя бы один размер.']);
+            $normalized = [];
+            foreach ($data['variants'] as $row) {
+                $row = $this->camelToSnakeVariantRow(is_array($row) ? $row : []);
+                $normalized[] = $row;
             }
-            $data['variants'] = array_values($variants);
-            $data['size'] = implode(', ', array_map(fn ($v) => $v['size'], $data['variants']));
-            $data['stock_quantity'] = array_sum(array_map(fn ($v) => (int) $v['stock_quantity'], $data['variants']));
-            $data['display_quantity'] = array_sum(array_map(fn ($v) => (int) $v['display_quantity'], $data['variants']));
-        } elseif (array_key_exists('size', $data) && trim((string) ($data['size'] ?? '')) !== '') {
-            $size = strip_tags(trim((string) $data['size']));
-            $stock = (int) ($data['stock_quantity'] ?? ($product?->stock_quantity ?? 0));
-            $display = (int) ($data['display_quantity'] ?? ($product?->display_quantity ?? 0));
-            $data['variants'] = [[
-                'size' => $size,
-                'stock_quantity' => max(0, $stock),
-                'display_quantity' => max(0, $display),
-            ]];
-        }
-
-        if (!array_key_exists('stock_quantity', $data)) {
-            $data['stock_quantity'] = $product ? (int) $product->stock_quantity : 0;
-        }
-        if (!array_key_exists('display_quantity', $data)) {
-            $data['display_quantity'] = $product ? (int) $product->display_quantity : 0;
+            $data['variants'] = $normalized;
         }
 
         unset($data['photo']);
@@ -287,24 +347,186 @@ class ProductController extends Controller
         return $data;
     }
 
-    private function sanitizeVariants(array $rawVariants): array
+    private function camelToSnakeVariantRow(array $row): array
     {
-        $variants = [];
-        foreach ($rawVariants as $variant) {
-            $size = strip_tags(trim((string) ($variant['size'] ?? '')));
-            if ($size === '') {
-                continue;
+        $map = [
+            'stockWarehouse' => 'stock_warehouse',
+            'stockStore' => 'stock_store',
+            'lowStockThreshold' => 'low_stock_threshold',
+            'salePrice' => 'sale_price',
+            'purchasePrice' => 'purchase_price',
+            'costPrice' => 'purchase_price',
+        ];
+        foreach ($map as $from => $to) {
+            if (array_key_exists($from, $row) && ! array_key_exists($to, $row)) {
+                $row[$to] = $row[$from];
             }
-            $stock = array_key_exists('stock_quantity', $variant)
-                ? (int) $variant['stock_quantity']
-                : (int) ($variant['quantity'] ?? 0);
-            $display = (int) ($variant['display_quantity'] ?? 0);
-            $variants[] = [
-                'size' => $size,
-                'stock_quantity' => max(0, $stock),
-                'display_quantity' => max(0, $display),
-            ];
         }
-        return $variants;
+
+        if (! array_key_exists('stock_warehouse', $row) && array_key_exists('stock_quantity', $row)) {
+            $row['stock_warehouse'] = $row['stock_quantity'];
+        }
+        if (! array_key_exists('stock_store', $row) && array_key_exists('display_quantity', $row)) {
+            $row['stock_store'] = $row['display_quantity'];
+        }
+        if ((! array_key_exists('sale_price', $row) || $row['sale_price'] === null || $row['sale_price'] === '') && array_key_exists('price', $row)) {
+            $row['sale_price'] = $row['price'];
+        }
+        if (array_key_exists('qty', $row) && ! array_key_exists('quantity', $row)) {
+            $row['quantity'] = $row['qty'];
+        }
+
+        return $row;
+    }
+
+    private function syncVariants(Product $product, array $variantRows, Request $request, ProductItemService $itemService): void
+    {
+        $category = $product->category_id ? Category::query()->find($product->category_id) : null;
+        if (! $category && $request->filled('category_id')) {
+            $category = Category::query()->find($request->integer('category_id'));
+        }
+
+        $keptIds = [];
+
+        foreach ($variantRows as $index => $row) {
+            $row = is_array($row) ? $row : [];
+            $id = isset($row['id']) ? (int) $row['id'] : null;
+            $size = strip_tags(trim((string) ($row['size'] ?? '')));
+            if ($size === '') {
+                throw ValidationException::withMessages(['variants' => 'Укажите размер для каждого варианта.']);
+            }
+
+            $wh = max(0, (int) ($row['stock_warehouse'] ?? $row['stock_quantity'] ?? 0));
+            $st = max(0, (int) ($row['stock_store'] ?? $row['display_quantity'] ?? 0));
+            if (array_key_exists('quantity', $row) && ! array_key_exists('stock_warehouse', $row) && ! array_key_exists('stock_store', $row)) {
+                $st = max(0, (int) $row['quantity']);
+                $wh = 0;
+            }
+
+            $sku = isset($row['sku']) ? trim(strip_tags((string) $row['sku'])) : '';
+            if ($sku === '') {
+                $sku = $this->proposeSku($category, $product->name, $size);
+                $sku = $this->ensureUniqueSku($sku, $id);
+            } else {
+                $sku = $this->ensureUniqueSku($sku, $id);
+            }
+
+            $salePrice = (float) ($row['sale_price'] ?? $row['price'] ?? 0);
+            $purchase = array_key_exists('purchase_price', $row) ? $row['purchase_price'] : null;
+            $purchase = $purchase === null ? null : (float) $purchase;
+
+            $low = max(0, (int) ($row['low_stock_threshold'] ?? 0));
+            $position = isset($row['position']) ? (int) $row['position'] : $index;
+
+            $payload = [
+                'size' => $size,
+                'sku' => $sku,
+                'stock_warehouse' => 0,
+                'stock_store' => 0,
+                'low_stock_threshold' => $low,
+                'sale_price' => $salePrice,
+                'purchase_price' => $purchase,
+                'position' => $position,
+            ];
+
+            if ($id) {
+                $variant = ProductVariant::query()
+                    ->where('product_id', $product->id)
+                    ->whereKey($id)
+                    ->first();
+                if (! $variant) {
+                    throw ValidationException::withMessages(['variants' => 'Вариант #'.$id.' не найден.']);
+                }
+
+                $variant->fill($payload);
+                $variant->save();
+            } else {
+                $variant = $product->variants()->create($payload);
+            }
+
+            $itemService->syncVariantInventory($variant, $wh, $st);
+
+            $keptIds[] = $variant->id;
+        }
+
+        ProductVariant::query()->where('product_id', $product->id)->whereNotIn('id', $keptIds)->delete();
+    }
+
+    private function proposeSku(?Category $category, string $productName, string $size): string
+    {
+        $prefix = $this->categoryCode($category?->name);
+        $abbr = $this->nameAbbrev($productName);
+
+        $sizeSlug = preg_replace('/\s+/u', '', mb_strtoupper($size));
+
+        return strtoupper($prefix.'-'.$abbr.'-'.($sizeSlug !== '' ? $sizeSlug : 'SZ'));
+    }
+
+    private function categoryCode(?string $categoryName): string
+    {
+        $n = mb_strtolower((string) ($categoryName ?? ''), 'UTF-8');
+
+        return match (true) {
+            str_contains($n, 'hoodie') || str_contains($n, 'худи') || str_contains($n, 'hudi') => 'HD',
+            str_contains($n, 'футбол') || str_contains($n, 't-shirt') || str_contains($n, 'tshirt') || str_contains($n, 't shirt') => 'TS',
+            str_contains($n, 'брюк') || str_contains($n, 'штаны') || str_contains($n, 'pant') => 'PT',
+            str_contains($n, 'обув') || str_contains($n, 'shoe') || str_contains($n, 'sneaker') => 'SH',
+            str_contains($n, 'куртк') || str_contains($n, 'jacket') => 'JK',
+            str_contains($n, 'электроник') || str_contains($n, 'electronic') => 'EL',
+            str_contains($n, 'одежда') || str_contains($n, 'cloth') => 'CL',
+            str_contains($n, 'продукт') || str_contains($n, 'еда') || str_contains($n, 'food') => 'FD',
+            default => 'GN',
+        };
+    }
+
+    private function nameAbbrev(string $productName): string
+    {
+        $words = array_values(array_filter(preg_split('/\s+/u', trim(strip_tags($productName))), fn ($x) => $x !== ''));
+
+        $map = ['black' => 'BLK', 'white' => 'WHT', 'red' => 'RED', 'blue' => 'BLU'];
+
+        $parts = [];
+
+        foreach (array_slice($words, 0, 2) as $wordRaw) {
+            $w = preg_replace('/\d+/','', strtolower(Str::ascii($wordRaw)));
+
+            foreach ($map as $k => $code) {
+                if (str_contains($w, $k)) {
+                    $parts[] = $code;
+                    continue 2;
+                }
+            }
+            $compact = preg_replace('/[^a-z]/', '', $w);
+            if ($compact !== '') {
+                $parts[] = strtoupper(mb_substr($compact, 0, 4));
+            }
+        }
+
+        if (empty($parts)) {
+            $parts[] = substr(strtoupper(Str::slug($productName, '')), 0, 6) ?: 'ITM';
+        }
+
+        return implode('-', array_slice($parts, 0, 2));
+    }
+
+    private function ensureUniqueSku(string $base, ?int $ignoreVariantId = null): string
+    {
+        $candidate = substr($base, 0, 118);
+        $n = 0;
+
+        do {
+            $try = $n === 0 ? $candidate : substr($candidate, 0, 110).'-'.$n;
+
+            $q = ProductVariant::query()->where('sku', $try);
+            if ($ignoreVariantId) {
+                $q->where('id', '<>', $ignoreVariantId);
+            }
+            if (! $q->exists()) {
+                return $try;
+            }
+            $n++;
+        } while ($n < 1000);
+
+        return strtoupper(substr(Str::slug($try, '-'), 0, 118));
     }
 }
