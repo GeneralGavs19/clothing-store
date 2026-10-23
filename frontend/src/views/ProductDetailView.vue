@@ -47,19 +47,23 @@
               <tr>
                 <th class="px-4 py-2.5 text-left font-medium">Размер</th>
                 <th class="px-4 py-2.5 text-right font-medium">В магазине</th>
+                <th class="px-4 py-2.5 text-right font-medium">На складе</th>
+                <th class="px-4 py-2.5 text-right font-medium">Всего</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-200 dark:divide-slate-800">
               <tr v-for="variant in product.variants || []" :key="variant.id">
                 <td class="px-4 py-3 font-medium">{{ variant.size }}</td>
                 <td class="px-4 py-3 text-right tabular-nums">{{ variant.stock_store ?? 0 }}</td>
+                <td class="px-4 py-3 text-right tabular-nums text-slate-500">{{ variant.stock_warehouse ?? 0 }}</td>
+                <td class="px-4 py-3 text-right font-semibold tabular-nums">{{ (variant.stock_store ?? 0) + (variant.stock_warehouse ?? 0) }}</td>
               </tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <section class="panel overflow-hidden">
+      <section v-if="allItems.length" class="panel overflow-hidden">
         <div class="flex flex-col gap-3 border-b border-slate-200 p-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 class="font-semibold">Единицы товара</h2>
@@ -159,7 +163,7 @@ const filteredItems = computed(() => {
   return list
 })
 
-const totalItems = computed(() => allItems.value.length)
+const totalItems = computed(() => Number(product.value?.total_quantity ?? product.value?.display_quantity ?? 0))
 
 async function load() {
   loading.value = true

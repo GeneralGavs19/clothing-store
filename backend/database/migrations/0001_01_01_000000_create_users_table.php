@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->string('email')->unique();
-            $table->enum('role', ['admin', 'cashier'])->default('cashier')->index();
+            $table->enum('role', ['admin_programmer', 'admin', 'cashier'])->default('cashier')->index();
             $table->boolean('is_active')->default(true)->index();
             $table->timestamp('last_login_at')->nullable();
             $table->timestamp('email_verified_at')->nullable();

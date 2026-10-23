@@ -314,6 +314,10 @@ class ProductController extends Controller
             'variants' => ['required', 'array', 'min:1'],
             'variants.*.id' => ['nullable', 'integer', 'exists:product_variants,id'],
             'variants.*.size' => ['required', 'string', 'max:64'],
+            'variants.*.stock_store' => ['nullable', 'integer', 'min:0'],
+            'variants.*.stock_warehouse' => ['nullable', 'integer', 'min:0'],
+            'variants.*.quantity' => ['nullable', 'integer', 'min:0'],
+            'variants.*.low_stock_threshold' => ['nullable', 'integer', 'min:0'],
             'variants.*.items' => ['nullable', 'array'],
             'variants.*.items.*' => ['nullable', 'string', 'max:64'],
             'variants.*.position' => ['sometimes', 'integer', 'min:0'],
@@ -404,12 +408,16 @@ class ProductController extends Controller
             $productPrice = (float) $product->sale_price;
             $position = isset($row['position']) ? (int) $row['position'] : $index;
 
+            $stockStore = isset($row['stock_store']) ? (int) $row['stock_store'] : (int) ($row['quantity'] ?? 0);
+            $stockWarehouse = isset($row['stock_warehouse']) ? (int) $row['stock_warehouse'] : 0;
+            $threshold = isset($row['low_stock_threshold']) ? (int) $row['low_stock_threshold'] : 0;
+
             $payload = [
                 'size' => $size,
                 'sku' => $sku,
-                'stock_warehouse' => 0,
-                'stock_store' => 0,
-                'low_stock_threshold' => 0,
+                'stock_warehouse' => $stockWarehouse,
+                'stock_store' => $stockStore,
+                'low_stock_threshold' => $threshold,
                 'sale_price' => $productPrice,
                 'purchase_price' => 0,
                 'position' => $position,
@@ -430,7 +438,9 @@ class ProductController extends Controller
                 $variant = $product->variants()->create($payload);
             }
 
-            $itemService->syncVariantItems($variant, $items);
+            if (! empty($items)) {
+                $itemService->syncVariantItems($variant, $items);
+            }
 
             $keptIds[] = $variant->id;
         }

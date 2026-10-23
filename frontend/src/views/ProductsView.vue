@@ -1,9 +1,9 @@
-﻿<template>
+<template>
   <div class="space-y-5">
     <section class="panel p-4">
       <div class="flex flex-col gap-3">
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <input v-model="filters.search" class="input" placeholder="Поиск по названию, цвету, размеру или коду единицы" @input="debouncedFetch" />
+          <input v-model="filters.search" class="input" placeholder="Поиск по названию, цвету, размеру..." @input="debouncedFetch" />
           <select v-model="filters.category_id" class="select" @change="fetchProducts(1)">
             <option value="">Все категории</option>
             <option v-for="category in catalog.categories" :key="category.id" :value="category.id">{{ category.name }}</option>
@@ -128,41 +128,53 @@
 
         <div ref="variantTableRef" class="block space-y-3 sm:col-span-2">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <span class="text-sm font-medium">Размеры и коды</span>
+            <div>
+              <span class="text-sm font-medium">Размеры и остатки</span>
+              <p class="text-xs text-slate-500">Укажите размер и количество товара в магазине</p>
+            </div>
             <div class="flex flex-wrap gap-2">
-              <button type="button" class="btn-muted h-8 px-2 text-xs" @click="quickAddSizesPrompt">+ Размер</button>
-              <button type="button" class="btn-primary h-8 px-2 text-xs" @click="addVariantRow">+ Размер</button>
+              <button type="button" class="btn-primary h-8 px-2.5 text-xs" @click="addVariantRow">+ Размер</button>
             </div>
           </div>
-          <div
-            v-for="(variant, index) in form.variants"
-            :key="`variant-${index}-${variant.id ?? 'n'}`"
-            class="rounded-lg border border-slate-200 p-3 dark:border-slate-800"
-          >
-            <div class="mb-2 flex flex-wrap items-center gap-2">
-              <input
-                v-model="variant.size"
-                class="input h-9 w-24 px-2 text-sm font-medium"
-                placeholder="S"
-                data-variant-focus="size"
-              />
-              <span class="text-xs text-slate-500">в магазине: {{ filledCodes(variant).length }}</span>
-              <div class="ml-auto flex gap-1">
-                <button type="button" class="btn-muted h-8 px-2 text-xs" @click="addCodeSlot(variant)">+ код</button>
-                <button type="button" class="btn-muted h-8 w-8 px-0" :disabled="form.variants.length === 1" @click="removeVariantRow(index)">×</button>
+          <div class="space-y-2">
+            <div
+              v-for="(variant, index) in form.variants"
+              :key="`variant-${index}-${variant.id ?? 'n'}`"
+              class="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/50"
+            >
+              <div class="flex-1">
+                <span class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Размер</span>
+                <input
+                  v-model="variant.size"
+                  class="input h-9 px-3 text-sm font-medium"
+                  placeholder="S, M, L, 42..."
+                  data-variant-focus="size"
+                  required
+                />
+              </div>
+              <div class="w-36">
+                <span class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Количество (шт.)</span>
+                <input
+                  v-model.number="variant.stock_store"
+                  class="input h-9 px-3 text-sm font-semibold tabular-nums"
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="0"
+                  required
+                />
+              </div>
+              <div class="pt-5">
+                <button
+                  type="button"
+                  class="btn-muted h-9 w-9 px-0 text-slate-400 hover:text-rose-500"
+                  :disabled="form.variants.length === 1"
+                  @click="removeVariantRow(index)"
+                  title="Удалить размер"
+                >×</button>
               </div>
             </div>
-            <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              <input
-                v-for="(code, ci) in variant.items"
-                :key="`code-${index}-${ci}`"
-                v-model="variant.items[ci]"
-                class="input h-9 font-mono text-xs"
-                placeholder="Код товара"
-              />
-            </div>
           </div>
-          <p class="text-xs text-slate-500">Введите код вручную для каждой единицы. Пустые поля не сохраняются.</p>
         </div>
 
         <label class="block sm:col-span-2">
@@ -253,7 +265,7 @@ let debounce
 const apiBase = computed(() => resolveApiOrigin())
 
 function blankVariant() {
-  return { id: null, size: '', items: [''] }
+  return { id: null, size: '', stock_store: 0 }
 }
 
 function emptyForm() {
@@ -268,30 +280,18 @@ function emptyForm() {
   }
 }
 
-function filledCodes(variant) {
-  return (variant.items || []).map((c) => String(c || '').trim()).filter(Boolean)
-}
-
-function addCodeSlot(variant) {
-  if (!Array.isArray(variant.items)) variant.items = ['']
-  variant.items.push('')
-}
-
 function normalizeVariantsFromProduct(product, rawVariants) {
   const list = Array.isArray(rawVariants) ? rawVariants : []
   if (list.length) {
     return list.map((v) => ({
       id: v.id ?? null,
       size: String(v.size || '').trim(),
-      items: (() => {
-        const codes = (v.items || []).map((i) => (typeof i === 'string' ? i : i.code || '')).filter(Boolean)
-        return codes.length ? [...codes, ''] : ['']
-      })(),
+      stock_store: Number(v.stock_store ?? v.display_quantity ?? 0),
     }))
   }
   const fbSize = String(product?.size || '').trim()
   if (fbSize) {
-    return [{ ...blankVariant(), size: fbSize, items: [''] }]
+    return [{ ...blankVariant(), size: fbSize, stock_store: Number(product?.display_quantity ?? 0) }]
   }
   return [blankVariant()]
 }
@@ -347,16 +347,16 @@ function prepareVariantsForSave(rows) {
     .map((v) => ({
       id: v.id,
       size: String(v.size || '').trim(),
-      items: filledCodes(v),
+      stock_store: Math.max(0, Number(v.stock_store) || 0),
     }))
-    .filter((v) => v.size && v.items.length)
+    .filter((v) => v.size)
 }
 
 async function saveProduct() {
   saving.value = true
   try {
     const variants = prepareVariantsForSave(form.variants)
-    if (!variants.length) throw new Error('Добавьте размер и хотя бы один код товара.')
+    if (!variants.length) throw new Error('Добавьте хотя бы один размер.')
     const payload = {
       name: form.name,
       color: form.color,
@@ -443,7 +443,7 @@ async function importProducts() {
 }
 
 const storeTotal = computed(() =>
-  (form.variants || []).reduce((s, v) => s + filledCodes(v).length, 0),
+  (form.variants || []).reduce((s, v) => s + (Number(v.stock_store) || 0), 0),
 )
 
 function variantSummaryLine(product) {
@@ -477,7 +477,7 @@ function removeVariantRow(index) {
 function quickAddSizesPrompt() {
   const size = window.prompt('Новый размер (S, M, L…)', '')
   if (!size?.trim()) return
-  form.variants.push({ ...blankVariant(), size: size.trim(), items: [''] })
+  form.variants.push({ ...blankVariant(), size: size.trim(), stock_store: 0 })
 }
 
 function photoUrl(path) {

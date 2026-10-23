@@ -6,6 +6,15 @@ function appendVariantRow(form, variant, index) {
     form.append(`variants[${index}][id]`, String(variant.id))
   }
   form.append(`variants[${index}][size]`, variant.size ?? '')
+  if (variant.stock_store != null && variant.stock_store !== '') {
+    form.append(`variants[${index}][stock_store]`, String(variant.stock_store))
+  }
+  if (variant.stock_warehouse != null && variant.stock_warehouse !== '') {
+    form.append(`variants[${index}][stock_warehouse]`, String(variant.stock_warehouse))
+  }
+  if (variant.quantity != null && variant.quantity !== '') {
+    form.append(`variants[${index}][quantity]`, String(variant.quantity))
+  }
   const codes = (variant.items || variant.codes || []).map((c) => String(c || '').trim()).filter(Boolean)
   codes.forEach((code, i) => {
     form.append(`variants[${index}][items][${i}]`, code)

@@ -46,6 +46,16 @@
           <LoaderCircle v-if="auth.loading" class="h-4 w-4 animate-spin" />
           Войти
         </button>
+
+        <div class="mt-4 flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+          <div>
+            <span class="font-semibold text-slate-800 dark:text-slate-200">Администратор:</span><br />
+            admin@store.local &bull; ChangeMe123!
+          </div>
+          <button type="button" class="ml-2 shrink-0 rounded bg-emerald-600 px-2.5 py-1.5 font-medium text-white hover:bg-emerald-500 transition-colors" @click="fillAdmin">
+            Заполнить
+          </button>
+        </div>
       </form>
     </section>
   </main>
@@ -82,7 +92,13 @@ const route = useRoute()
 const router = useRouter()
 const form = reactive({ email: '', password: '' })
 
+function fillAdmin() {
+  form.email = 'admin@store.local'
+  form.password = 'ChangeMe123!'
+}
+
 async function submit() {
+  form.email = form.email.trim().toLowerCase()
   try {
     await auth.login(form)
     toast.push('Добро пожаловать')

@@ -88,6 +88,8 @@ class ReportController extends Controller
 
     public function rebuildStatistics(Request $request, ActivityLogger $logger)
     {
+        Statistic::query()->delete();
+
         $rows = Sale::query()
             ->where('status', 'approved')
             ->selectRaw('DATE(approved_at) as date, COUNT(*) as sales_count, SUM(subtotal) as revenue, SUM(profit) as profit')

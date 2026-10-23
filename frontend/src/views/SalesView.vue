@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="space-y-5">
     <section class="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_1.1fr]">
       <div class="panel p-4">
@@ -18,9 +18,9 @@
         <input
           v-model="productSearch"
           class="input"
-          placeholder="Сканируйте код единицы или ищите модель"
+          placeholder="Поиск товара по названию..."
           @input="debouncedProducts"
-          @keyup.enter="onSearchEnter"
+          @keyup.enter="debouncedProducts"
         />
 
         <!-- Шаг 1: модель -->
@@ -47,7 +47,10 @@
 
         <!-- Шаг 2: размер -->
         <div v-else-if="saleStep === 'variant'" class="mt-4 space-y-2">
-          <p class="text-sm font-medium">{{ selectedProduct?.name }}</p>
+          <div class="flex items-center justify-between">
+            <p class="text-sm font-medium">{{ selectedProduct?.name }}</p>
+            <button type="button" class="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200" @click="goBackStep">← К списку товаров</button>
+          </div>
           <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <button
               v-for="v in variantsWithStock"
@@ -62,50 +65,37 @@
           </div>
           <p v-if="!variantsWithStock.length" class="text-sm text-slate-500">Нет размеров в наличии</p>
         </div>
-
-        <!-- Шаг 3: код единицы -->
-        <div v-else class="mt-4 space-y-2">
-          <p class="text-sm text-slate-500">{{ selectedProduct?.name }} · размер {{ selectedVariant?.size }}</p>
-          <div class="max-h-[24rem] space-y-1 overflow-y-auto">
-            <button
-              v-for="item in availableItemsForVariant"
-              :key="item.id"
-              type="button"
-              class="flex w-full items-center justify-between rounded-md border border-slate-200 px-3 py-2 font-mono text-sm transition hover:border-emerald-400 dark:border-slate-800"
-              @click="addItemToCart(item)"
-            >
-              <span>{{ item.code }}</span>
-              <span class="text-xs text-slate-500">{{ locationLabel(item.location) }}</span>
-            </button>
-          </div>
-          <p v-if="!availableItemsForVariant.length" class="text-sm text-slate-500">Нет доступных единиц</p>
-        </div>
       </div>
 
       <div class="panel p-4">
         <h2 class="mb-1 font-semibold">Корзина</h2>
-        <p class="mb-4 text-xs text-slate-500">Каждая позиция — одна единица с уникальным кодом</p>
+        <p class="mb-4 text-xs text-slate-500">Позиции и количество в чеке</p>
 
-        <EmptyState v-if="!cart.length" title="Корзина пуста" text="Выберите товар и код единицы слева." :icon="ShoppingCart" />
+        <EmptyState v-if="!cart.length" title="Корзина пуста" text="Выберите товар и размер слева." :icon="ShoppingCart" />
 
         <form v-else class="space-y-4" @submit.prevent="createSale">
           <div class="space-y-2">
             <div
               v-for="item in cart"
-              :key="item.product_item_id"
+              :key="item.product_variant_id"
               class="rounded-md border border-slate-200 p-3 dark:border-slate-800"
             >
               <div class="flex items-start justify-between gap-2">
-                <div class="min-w-0">
+                <div class="min-w-0 flex-1">
                   <div class="text-sm font-medium">{{ item.product.name }}</div>
                   <div class="text-xs text-slate-500">
-                    {{ item.variant.size }} · <span class="font-mono">{{ item.code }}</span>
+                    Размер: <span class="font-semibold text-slate-700 dark:text-slate-300">{{ item.variant.size }}</span>
                   </div>
-                  <div class="mt-1 text-sm font-semibold">{{ money(item.price) }}</div>
+                  <div class="mt-1 text-sm font-semibold">{{ money(item.price * item.quantity) }}</div>
                 </div>
-                <button type="button" class="btn-muted h-8 w-8 px-0" @click="removeFromCart(item.product_item_id)">
-                  <X class="h-4 w-4" />
-                </button>
+                <div class="flex items-center gap-1.5">
+                  <button type="button" class="btn-muted h-7 w-7 px-0 text-sm font-bold" @click="decreaseQty(item)">-</button>
+                  <span class="w-6 text-center text-sm font-semibold tabular-nums">{{ item.quantity }}</span>
+                  <button type="button" class="btn-muted h-7 w-7 px-0 text-sm font-bold" @click="increaseQty(item)">+</button>
+                  <button type="button" class="btn-muted ml-1 h-7 w-7 px-0 text-rose-500 hover:text-rose-600" @click="removeFromCart(item.product_variant_id)" title="Удалить">
+                    <X class="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -119,7 +109,7 @@
             <div>
               <div class="text-sm text-slate-500">Сумма</div>
               <div class="text-xl font-semibold">{{ money(cartTotal) }}</div>
-              <div class="text-xs text-slate-500">{{ cart.length }} ед.</div>
+              <div class="text-xs text-slate-500">{{ totalCartUnits }} ед.</div>
             </div>
             <button type="submit" class="btn-primary w-full sm:w-auto" :disabled="saving">
               <LoaderCircle v-if="saving" class="h-4 w-4 animate-spin" />
@@ -200,8 +190,7 @@ const apiBase = computed(() => resolveApiOrigin())
 
 const stepHint = computed(() => {
   if (saleStep.value === 'products') return 'Шаг 1: выберите модель товара'
-  if (saleStep.value === 'variant') return 'Шаг 2: выберите размер'
-  return 'Шаг 3: выберите код единицы'
+  return 'Шаг 2: выберите размер для добавления в чек'
 })
 
 const availableProducts = computed(() =>
@@ -213,13 +202,13 @@ const variantsWithStock = computed(() => {
   return variants.filter((v) => variantStock(v) > 0)
 })
 
-const availableItemsForVariant = computed(() => {
-  if (!selectedVariant.value) return []
-  const items = selectedVariant.value.items || []
-  return items.filter((i) => i.status === 'available')
-})
+const totalCartUnits = computed(() =>
+  cart.value.reduce((sum, row) => sum + Number(row.quantity || 1), 0),
+)
 
-const cartTotal = computed(() => cart.value.reduce((sum, row) => sum + Number(row.price || 0), 0))
+const cartTotal = computed(() =>
+  cart.value.reduce((sum, row) => sum + Number(row.price || 0) * Number(row.quantity || 1), 0),
+)
 
 function variantStock(v) {
   return Number(v.stock_store ?? 0) + Number(v.stock_warehouse ?? 0)
@@ -231,10 +220,6 @@ function variantStockLabel(v) {
   if (store && wh) return `${store} маг. + ${wh} скл.`
   if (store) return `${store}`
   return `${wh}`
-}
-
-function locationLabel(loc) {
-  return loc === 'stock' ? 'Склад' : 'Магазин'
 }
 
 function photoUrl(path) {
@@ -264,44 +249,61 @@ async function selectProduct(product) {
 
 function selectVariant(variant) {
   const full = (productDetail.value?.variants || []).find((v) => Number(v.id) === Number(variant.id)) || variant
-  selectedVariant.value = full
-  saleStep.value = 'items'
-}
-
-function goBackStep() {
-  if (saleStep.value === 'items') {
-    saleStep.value = 'variant'
-    selectedVariant.value = null
-  } else if (saleStep.value === 'variant') {
-    saleStep.value = 'products'
-    selectedProduct.value = null
-    productDetail.value = null
-  }
-}
-
-function addItemToCart(item) {
-  if (cart.value.some((c) => c.product_item_id === item.id)) {
-    toast.push('Эта единица уже в корзине', 'error')
-    return
-  }
   const product = productDetail.value || selectedProduct.value
-  const variant = selectedVariant.value
-  cart.value.push({
-    product_item_id: item.id,
-    code: item.code,
-    product,
-    variant,
-    price: Number(variant?.sale_price ?? product?.sale_price ?? 0),
-  })
-  toast.push(`Добавлено: ${item.code}`)
+  const maxAvail = Number(full.stock_store ?? full.display_quantity ?? 0)
+  const existing = cart.value.find((c) => c.product_variant_id === full.id)
+
+  if (existing) {
+    if (maxAvail <= 0 || existing.quantity < maxAvail) {
+      existing.quantity++
+      toast.push(`Количество увеличено: ${product.name} (${full.size})`)
+    } else {
+      toast.push(`В магазине только ${maxAvail} шт.`, 'error')
+    }
+  } else {
+    cart.value.push({
+      product_id: product.id,
+      product_variant_id: full.id,
+      product,
+      variant: full,
+      price: Number(product.sale_price || 0),
+      quantity: 1,
+      maxQuantity: maxAvail,
+    })
+    toast.push(`Добавлено в чек: ${product.name} (${full.size})`)
+  }
   saleStep.value = 'products'
   selectedProduct.value = null
   selectedVariant.value = null
   productDetail.value = null
 }
 
-function removeFromCart(itemId) {
-  cart.value = cart.value.filter((c) => c.product_item_id !== itemId)
+function increaseQty(item) {
+  const max = Number(item.maxQuantity ?? 0)
+  if (max > 0 && item.quantity >= max) {
+    toast.push(`В магазине только ${max} шт.`, 'error')
+    return
+  }
+  item.quantity++
+}
+
+function decreaseQty(item) {
+  if (item.quantity > 1) {
+    item.quantity--
+  } else {
+    removeFromCart(item.product_variant_id)
+  }
+}
+
+function removeFromCart(variantId) {
+  cart.value = cart.value.filter((c) => c.product_variant_id !== variantId)
+}
+
+function goBackStep() {
+  saleStep.value = 'products'
+  selectedProduct.value = null
+  selectedVariant.value = null
+  productDetail.value = null
 }
 
 async function createSale() {
@@ -309,8 +311,13 @@ async function createSale() {
   saving.value = true
   try {
     await sales.create({
-      items: cart.value.map((row) => ({ product_item_id: row.product_item_id })),
-      cashier_note: cashierNote.value,
+      items: cart.value.map((row) => ({
+        product_id: row.product.id,
+        product_variant_id: row.product_variant_id,
+        quantity: row.quantity,
+        source: 'display',
+      })),
+      cashier_note: cashierNote.value ? cashierNote.value.trim() : null,
     })
     toast.push('Продажа оформлена')
     cart.value = []
@@ -330,32 +337,6 @@ async function fetchProducts() {
 function debouncedProducts() {
   window.clearTimeout(debounce)
   debounce = window.setTimeout(fetchProducts, 300)
-}
-
-async function onSearchEnter() {
-  const code = String(productSearch.value || '').trim()
-  if (!code) return
-  try {
-    const data = await catalog.lookupItemByCode(code)
-    const item = data.item
-    const product = data.product
-    const variant = data.variant
-    if (!item || item.status !== 'available') {
-      toast.push('Единица недоступна', 'error')
-      return
-    }
-    cart.value.push({
-      product_item_id: item.id,
-      code: item.code,
-      product,
-      variant,
-      price: Number(variant?.sale_price ?? product?.sale_price ?? 0),
-    })
-    toast.push(`Добавлено: ${item.code}`)
-    productSearch.value = ''
-  } catch {
-    await fetchProducts()
-  }
 }
 
 async function fetchHistory(page = 1) {
