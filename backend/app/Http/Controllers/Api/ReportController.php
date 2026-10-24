@@ -14,6 +14,9 @@ use App\Services\ActivityLogger;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -23,30 +26,8 @@ class ReportController extends Controller
     {
         $fileName = 'sales-report-'.now()->format('Y-m-d-His').'.xlsx';
 
-        $spreadsheet = new Spreadsheet;
-        $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle('Товары в заказах');
-
-        $headers = [
-            '№ продажи',
-            'Дата',
-            'Тип заказа',
-            'Название товара',
-            'Вид товара',
-            'Размер',
-            'Кол-во, шт.',
-            'Цена за шт., ₸',
-            'Сумма, ₸',
-            'Кассир',
-            'Примечание',
-            'Статус',
-        ];
-        $sheet->fromArray($headers, null, 'A1');
-        $sheet->getStyle('A1:L1')->getFont()->setBold(true);
-
-        $rowIndex = 2;
         $salesQuery = Sale::query()
-            ->with(['items.product', 'cashier']);
+            ->with(['items.product.category', 'items.productVariant', 'cashier']);
 
         if ($request->user()->isCashier()) {
             $salesQuery->where('cashier_id', $request->user()->id);
@@ -60,115 +41,425 @@ class ReportController extends Controller
             ->orderByDesc('approved_at')
             ->orderByDesc('id');
 
-        $salesQuery->chunk(150, function ($sales) use ($sheet, &$rowIndex) {
-            foreach ($sales as $sale) {
-                $orderType = $sale->is_on_order ? 'На заказ' : 'В наличии';
-                $dateStr = ($sale->approved_at ?? $sale->created_at)?->format('d.m.Y H:i') ?? '—';
-                $statusLabel = match ($sale->status) {
-                    'approved' => 'Оформлен',
-                    'rejected' => 'Отменён',
-                    default => 'В ожидании',
-                };
-                $saleNum = '№'.$sale->id;
+        $sales = $salesQuery->get();
 
-                if ($sale->items->isEmpty()) {
-                    $sheet->fromArray([
-                        $saleNum,
-                        $dateStr,
-                        $orderType,
-                        'Без товаров',
-                        '—',
-                        '—',
-                        0,
-                        (float) $sale->subtotal,
-                        (float) $sale->subtotal,
-                        $sale->cashier?->name ?? '—',
-                        $sale->cashier_note ?? '—',
-                        $statusLabel,
-                    ], null, 'A'.$rowIndex);
-                    $rowIndex++;
-                    continue;
-                }
+        // Подсчет сводных показателей (KPI)
+        $totalSalesCount = $sales->count();
+        $totalSoldQty = 0;
+        $totalRevenue = 0.0;
+        $inStockQty = 0;
+        $onOrderQty = 0;
+        $inStockRev = 0.0;
+        $onOrderRev = 0.0;
 
-                foreach ($sale->items as $item) {
-                    $sheet->fromArray([
-                        $saleNum,
-                        $dateStr,
-                        $orderType,
-                        $item->product_name ?: $item->product?->name ?: 'Удалённый товар',
-                        $item->product_type ?: $item->product?->type ?: '—',
-                        $item->variant_size ?: '—',
-                        (int) $item->quantity,
-                        (float) $item->sale_price,
-                        (float) $item->line_total,
-                        $sale->cashier?->name ?? '—',
-                        $sale->cashier_note ?? '—',
-                        $statusLabel,
-                    ], null, 'A'.$rowIndex);
-                    $rowIndex++;
+        foreach ($sales as $sale) {
+            $isOnOrder = (bool) $sale->is_on_order;
+            foreach ($sale->items as $item) {
+                $qty = (int) $item->quantity;
+                $tot = (float) $item->line_total;
+                $totalSoldQty += $qty;
+                $totalRevenue += $tot;
+                if ($isOnOrder) {
+                    $onOrderQty += $qty;
+                    $onOrderRev += $tot;
+                } else {
+                    $inStockQty += $qty;
+                    $inStockRev += $tot;
                 }
             }
-        });
-
-        foreach (range('A', 'L') as $column) {
-            $sheet->getColumnDimension($column)->setAutoSize(true);
         }
 
-        // Вторая вкладка: Сводка по чекам
+        $spreadsheet = new Spreadsheet;
+
+        // ==========================================
+        // ЛИСТ 1: ПРОДАЖИ ТОВАРОВ (ДЕТАЛЬНО ПО ВЕЩАМ)
+        // ==========================================
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Продажи товаров (детально)');
+        $sheet->setShowGridlines(true);
+
+        // Заголовок отчета
+        $sheet->setCellValue('A1', 'ОТЧЕТ ПО ПРОДАЖАМ И ЗАКАЗАМ ТОВАРОВ');
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14)->getColor()->setRGB('1E293B');
+
+        $periodText = $request->filled('date_from') || $request->filled('date_to')
+            ? ('Период: ' . ($request->input('date_from') ?: '...') . ' — ' . ($request->input('date_to') ?: '...'))
+            : 'Период: Все время';
+        $sheet->setCellValue('A2', "Магазин одежды · {$periodText} · Сформирован: " . now()->format('d.m.Y H:i'));
+        $sheet->getStyle('A2')->getFont()->setItalic(true)->setSize(10)->getColor()->setRGB('64748B');
+
+        // Сводные карточки KPI сверху таблицы (строки 4 и 5)
+        $sheet->mergeCells('A4:C4');
+        $sheet->setCellValue('A4', 'ОБЩЕЕ КОЛИЧЕСТВО ПРОДАННЫХ ВЕЩЕЙ');
+        $sheet->mergeCells('A5:C5');
+        $sheet->setCellValue('A5', $totalSoldQty . ' шт.');
+
+        $sheet->mergeCells('D4:G4');
+        $sheet->setCellValue('D4', 'ОБЩАЯ ЦЕНА ПРОДАЖИ (ВЫРУЧКА)');
+        $sheet->mergeCells('D5:G5');
+        $sheet->setCellValue('D5', number_format($totalRevenue, 0, '.', ' ') . ' ₸');
+
+        $sheet->mergeCells('H4:J4');
+        $sheet->setCellValue('H4', 'ИЗ НАЛИЧИЯ (СКЛАД/МАГАЗИН)');
+        $sheet->mergeCells('H5:J5');
+        $sheet->setCellValue('H5', $inStockQty . ' шт. · ' . number_format($inStockRev, 0, '.', ' ') . ' ₸');
+
+        $sheet->mergeCells('K4:N4');
+        $sheet->setCellValue('K4', '📦 НА ЗАКАЗ (ПРЕДЗАКАЗЫ)');
+        $sheet->mergeCells('K5:N5');
+        $sheet->setCellValue('K5', $onOrderQty . ' шт. · ' . number_format($onOrderRev, 0, '.', ' ') . ' ₸');
+
+        // Стилизация KPI карточек
+        $sheet->getStyle('A4:N4')->applyFromArray([
+            'font' => ['bold' => true, 'size' => 9, 'color' => ['rgb' => '475569']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F1F5F9']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+        $sheet->getStyle('A5:N5')->applyFromArray([
+            'font' => ['bold' => true, 'size' => 12, 'color' => ['rgb' => '0F172A']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F8FAFC']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+        $sheet->getStyle('A4:N5')->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('CBD5E1');
+
+        // Заголовки основной таблицы (строка 7)
+        $headers1 = [
+            '№ чека',
+            'Дата продажи',
+            'Тип заказа',
+            'Название товара (вещи)',
+            'Вид товара',
+            'Категория',
+            'Размер',
+            'Цвет',
+            'Кол-во (шт.)',
+            'Цена за шт., ₸',
+            'Общая цена продажи, ₸',
+            'Кассир',
+            'Примечание',
+            'Статус',
+        ];
+        $sheet->fromArray($headers1, null, 'A7');
+        $sheet->getRowDimension(7)->setRowHeight(26);
+        $sheet->getStyle('A7:N7')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 10],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '107C41']], // Фирменный зеленый Excel
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER, 'wrapText' => true],
+        ]);
+
+        $r = 8;
+        foreach ($sales as $sale) {
+            $orderType = $sale->is_on_order ? '📦 На заказ' : 'В наличии';
+            // Единая понятная колонка даты продажи (убраны дубли Создана/Оформлена)
+            $dateStr = ($sale->approved_at ?? $sale->created_at)?->format('d.m.Y H:i') ?? '—';
+            $statusLabel = match ($sale->status) {
+                'approved' => 'Оформлен',
+                'rejected' => 'Отменён',
+                default => 'В ожидании',
+            };
+            $saleNum = '№' . $sale->id;
+
+            if ($sale->items->isEmpty()) {
+                $sheet->fromArray([
+                    $saleNum,
+                    $dateStr,
+                    $orderType,
+                    'Без товаров',
+                    '—',
+                    '—',
+                    '—',
+                    '—',
+                    0,
+                    (float) $sale->subtotal,
+                    (float) $sale->subtotal,
+                    $sale->cashier?->name ?? '—',
+                    $sale->cashier_note ?? '—',
+                    $statusLabel,
+                ], null, 'A' . $r);
+                $r++;
+                continue;
+            }
+
+            foreach ($sale->items as $item) {
+                $prodName = $item->product_name ?: $item->product?->name ?: 'Товар';
+                $prodType = $item->product_type ?: $item->product?->type ?: '—';
+                $catName = $item->product?->category?->name ?: '—';
+                $color = $item->product?->color ?: '—';
+                $size = $item->variant_size ?: '—';
+                $qty = (int) $item->quantity;
+                $price = (float) $item->sale_price;
+                $total = (float) $item->line_total;
+
+                $sheet->fromArray([
+                    $saleNum,
+                    $dateStr,
+                    $orderType,
+                    $prodName,
+                    $prodType,
+                    $catName,
+                    $size,
+                    $color,
+                    $qty,
+                    $price,
+                    $total,
+                    $sale->cashier?->name ?? '—',
+                    $sale->cashier_note ?? '—',
+                    $statusLabel,
+                ], null, 'A' . $r);
+
+                $r++;
+            }
+        }
+
+        $dataEndRow = max(8, $r - 1);
+
+        // Строка ИТОГО внизу таблицы
+        $totalRow = $r;
+        $sheet->mergeCells("A{$totalRow}:H{$totalRow}");
+        $sheet->setCellValue("A{$totalRow}", 'ИТОГО ПО ВСЕМ ПРОДАЖАМ:');
+        $sheet->setCellValue("I{$totalRow}", "=SUM(I8:I{$dataEndRow})");
+        $sheet->setCellValue("J{$totalRow}", '—');
+        $sheet->setCellValue("K{$totalRow}", "=SUM(K8:K{$dataEndRow})");
+        $sheet->setCellValue("L{$totalRow}", '');
+        $sheet->setCellValue("M{$totalRow}", '');
+        $sheet->setCellValue("N{$totalRow}", '');
+
+        $sheet->getStyle("A{$totalRow}:N{$totalRow}")->applyFromArray([
+            'font' => ['bold' => true, 'size' => 11, 'color' => ['rgb' => '000000']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E2E8F0']],
+            'borders' => [
+                'top' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => '94A3B8']],
+                'bottom' => ['borderStyle' => Border::BORDER_DOUBLE, 'color' => ['rgb' => '000000']],
+            ],
+        ]);
+        $sheet->getStyle("A{$totalRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+        $sheet->getStyle("I{$totalRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("K{$totalRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+
+        // Стилизация и границы всей таблицы
+        $sheet->getStyle("A8:N{$dataEndRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('E2E8F0');
+        $sheet->getStyle("A8:A{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("B8:B{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("C8:C{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("D8:D{$dataEndRow}")->getFont()->setBold(true);
+        $sheet->getStyle("G8:G{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("H8:H{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("I8:I{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("N8:N{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+        // Числовые форматы для штук и валюты
+        $sheet->getStyle("I8:I{$totalRow}")->getNumberFormat()->setFormatCode('#,##0');
+        $sheet->getStyle("J8:J{$dataEndRow}")->getNumberFormat()->setFormatCode('#,##0 "₸"');
+        $sheet->getStyle("K8:K{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 "₸"');
+
+        foreach (range('A', 'N') as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+
+        // ==========================================
+        // ЛИСТ 2: СВОДКА ПО ТОВАРАМ И РАЗМЕРАМ
+        // ==========================================
         $sheet2 = $spreadsheet->createSheet();
-        $sheet2->setTitle('Сводка по чекам');
+        $sheet2->setTitle('Сводка по товарам');
+        $sheet2->setShowGridlines(true);
+
+        $sheet2->setCellValue('A1', 'СВОДНАЯ СТАТИСТИКА ПРОДАННЫХ ТОВАРОВ И ОСТАТКОВ');
+        $sheet2->getStyle('A1')->getFont()->setBold(true)->setSize(13)->getColor()->setRGB('1E293B');
+        $sheet2->setCellValue('A2', 'Агрегированные продажи каждого товара с разбивкой по размерам · Формула: Было = Продано + Остаток');
+        $sheet2->getStyle('A2')->getFont()->setItalic(true)->setSize(10)->getColor()->setRGB('64748B');
+
         $headers2 = [
-            '№ продажи',
-            'Дата',
+            'Название товара (вещи)',
+            'Вид товара',
+            'Категория',
+            'Размер',
+            'Цвет',
+            'Цена продажи, ₸',
+            'Общее количество проданных (шт.)',
+            'Общая цена продажи (Выручка), ₸',
+            'Текущий остаток (шт.)',
+            'Было учтено (Продано + Остаток)',
+        ];
+        $sheet2->fromArray($headers2, null, 'A4');
+        $sheet2->getRowDimension(4)->setRowHeight(24);
+        $sheet2->getStyle('A4:J4')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 10],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '0284C7']], // Синий оттенок для второй вкладки
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER, 'wrapText' => true],
+        ]);
+
+        $productsAggregated = [];
+        foreach ($sales as $sale) {
+            if ($sale->status === 'rejected') {
+                continue;
+            }
+            foreach ($sale->items as $item) {
+                $pName = $item->product_name ?: $item->product?->name ?: 'Товар';
+                $pType = $item->product_type ?: $item->product?->type ?: '—';
+                $pCat = $item->product?->category?->name ?: '—';
+                $pSize = $item->variant_size ?: '—';
+                $pColor = $item->product?->color ?: '—';
+                $key = $pName . '___' . $pSize;
+
+                if (! isset($productsAggregated[$key])) {
+                    $stockStore = (int) ($item->productVariant?->stock_store ?? $item->product?->stock_quantity ?? 0);
+                    $stockWh = (int) ($item->productVariant?->stock_warehouse ?? 0);
+                    $currentStock = $stockStore + $stockWh;
+
+                    $productsAggregated[$key] = [
+                        'name' => $pName,
+                        'type' => $pType,
+                        'category' => $pCat,
+                        'size' => $pSize,
+                        'color' => $pColor,
+                        'sale_price' => (float) $item->sale_price,
+                        'sold_quantity' => 0,
+                        'total_revenue' => 0.0,
+                        'current_stock' => $currentStock,
+                    ];
+                }
+
+                $productsAggregated[$key]['sold_quantity'] += (int) $item->quantity;
+                $productsAggregated[$key]['total_revenue'] += (float) $item->line_total;
+            }
+        }
+
+        $r2 = 5;
+        foreach ($productsAggregated as $row) {
+            $initial = $row['sold_quantity'] + $row['current_stock'];
+            $sheet2->fromArray([
+                $row['name'],
+                $row['type'],
+                $row['category'],
+                $row['size'],
+                $row['color'],
+                $row['sale_price'],
+                $row['sold_quantity'],
+                $row['total_revenue'],
+                $row['current_stock'],
+                $initial,
+            ], null, 'A' . $r2);
+            $r2++;
+        }
+
+        $end2 = max(5, $r2 - 1);
+        $totalRow2 = $r2;
+
+        $sheet2->mergeCells("A{$totalRow2}:F{$totalRow2}");
+        $sheet2->setCellValue("A{$totalRow2}", 'ИТОГО:');
+        $sheet2->setCellValue("G{$totalRow2}", "=SUM(G5:G{$end2})");
+        $sheet2->setCellValue("H{$totalRow2}", "=SUM(H5:H{$end2})");
+        $sheet2->setCellValue("I{$totalRow2}", "=SUM(I5:I{$end2})");
+        $sheet2->setCellValue("J{$totalRow2}", "=SUM(J5:J{$end2})");
+
+        $sheet2->getStyle("A{$totalRow2}:J{$totalRow2}")->applyFromArray([
+            'font' => ['bold' => true, 'size' => 11, 'color' => ['rgb' => '000000']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E2E8F0']],
+            'borders' => [
+                'top' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => '94A3B8']],
+                'bottom' => ['borderStyle' => Border::BORDER_DOUBLE, 'color' => ['rgb' => '000000']],
+            ],
+        ]);
+        $sheet2->getStyle("A{$totalRow2}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+
+        $sheet2->getStyle("A5:J{$end2}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('E2E8F0');
+        $sheet2->getStyle("D5:E{$end2}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet2->getStyle("G5:G{$totalRow2}")->getNumberFormat()->setFormatCode('#,##0');
+        $sheet2->getStyle("F5:F{$end2}")->getNumberFormat()->setFormatCode('#,##0 "₸"');
+        $sheet2->getStyle("H5:H{$totalRow2}")->getNumberFormat()->setFormatCode('#,##0 "₸"');
+        $sheet2->getStyle("I5:J{$totalRow2}")->getNumberFormat()->setFormatCode('#,##0');
+
+        foreach (range('A', 'J') as $col) {
+            $sheet2->getColumnDimension($col)->setAutoSize(true);
+        }
+
+        // ==========================================
+        // ЛИСТ 3: СВОДКА ПО ЧЕКАМ (ПОЛНЫЕ ЗАКАЗЫ)
+        // ==========================================
+        $sheet3 = $spreadsheet->createSheet();
+        $sheet3->setTitle('Сводка по чекам');
+        $sheet3->setShowGridlines(true);
+
+        $sheet3->setCellValue('A1', 'СВОДКА ПО ОФОРМЛЕННЫМ ЧЕКАМ');
+        $sheet3->getStyle('A1')->getFont()->setBold(true)->setSize(13)->getColor()->setRGB('1E293B');
+
+        $headers3 = [
+            '№ чека',
+            'Дата продажи',
             'Тип заказа',
             'Состав заказа (Товары и размеры)',
-            'Всего шт.',
+            'Общее кол-во вещей (шт.)',
             'Сумма чека, ₸',
             'Кассир',
             'Примечание',
             'Статус',
         ];
-        $sheet2->fromArray($headers2, null, 'A1');
-        $sheet2->getStyle('A1:I1')->getFont()->setBold(true);
+        $sheet3->fromArray($headers3, null, 'A3');
+        $sheet3->getRowDimension(3)->setRowHeight(24);
+        $sheet3->getStyle('A3:I3')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 10],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '475569']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER, 'wrapText' => true],
+        ]);
 
-        $r2 = 2;
-        $salesQuery->chunk(150, function ($sales) use ($sheet2, &$r2) {
-            foreach ($sales as $sale) {
-                $orderType = $sale->is_on_order ? 'На заказ' : 'В наличии';
-                $dateStr = ($sale->approved_at ?? $sale->created_at)?->format('d.m.Y H:i') ?? '—';
-                $statusLabel = match ($sale->status) {
-                    'approved' => 'Оформлен',
-                    'rejected' => 'Отменён',
-                    default => 'В ожидании',
-                };
-                $saleNum = '№'.$sale->id;
+        $r3 = 4;
+        foreach ($sales as $sale) {
+            $orderType = $sale->is_on_order ? '📦 На заказ' : 'В наличии';
+            $dateStr = ($sale->approved_at ?? $sale->created_at)?->format('d.m.Y H:i') ?? '—';
+            $statusLabel = match ($sale->status) {
+                'approved' => 'Оформлен',
+                'rejected' => 'Отменён',
+                default => 'В ожидании',
+            };
+            $saleNum = '№' . $sale->id;
 
-                $itemsSummary = $sale->items->map(function ($it) {
-                    $name = $it->product_name ?: $it->product?->name ?: 'Товар';
-                    $sz = $it->variant_size ? " ({$it->variant_size})" : '';
+            $itemsSummary = $sale->items->map(function ($it) {
+                $name = $it->product_name ?: $it->product?->name ?: 'Товар';
+                $sz = $it->variant_size ? " ({$it->variant_size})" : '';
+                return "{$name}{$sz} × {$it->quantity} шт.";
+            })->implode(', ');
 
-                    return "{$name}{$sz} × {$it->quantity} шт.";
-                })->implode(', ');
+            $totalQty = (int) $sale->items->sum('quantity');
 
-                $totalQty = (int) $sale->items->sum('quantity');
+            $sheet3->fromArray([
+                $saleNum,
+                $dateStr,
+                $orderType,
+                $itemsSummary ?: '—',
+                $totalQty,
+                (float) $sale->subtotal,
+                $sale->cashier?->name ?? '—',
+                $sale->cashier_note ?? '—',
+                $statusLabel,
+            ], null, 'A' . $r3);
+            $r3++;
+        }
 
-                $sheet2->fromArray([
-                    $saleNum,
-                    $dateStr,
-                    $orderType,
-                    $itemsSummary ?: '—',
-                    $totalQty,
-                    (float) $sale->subtotal,
-                    $sale->cashier?->name ?? '—',
-                    $sale->cashier_note ?? '—',
-                    $statusLabel,
-                ], null, 'A'.$r2);
-                $r2++;
-            }
-        });
+        $end3 = max(4, $r3 - 1);
+        $totalRow3 = $r3;
 
-        foreach (range('A', 'I') as $column) {
-            $sheet2->getColumnDimension($column)->setAutoSize(true);
+        $sheet3->mergeCells("A{$totalRow3}:D{$totalRow3}");
+        $sheet3->setCellValue("A{$totalRow3}", 'ИТОГО ПО ВСЕМ ЧЕКАМ:');
+        $sheet3->setCellValue("E{$totalRow3}", "=SUM(E4:E{$end3})");
+        $sheet3->setCellValue("F{$totalRow3}", "=SUM(F4:F{$end3})");
+
+        $sheet3->getStyle("A{$totalRow3}:I{$totalRow3}")->applyFromArray([
+            'font' => ['bold' => true, 'size' => 11, 'color' => ['rgb' => '000000']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E2E8F0']],
+            'borders' => [
+                'top' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => '94A3B8']],
+                'bottom' => ['borderStyle' => Border::BORDER_DOUBLE, 'color' => ['rgb' => '000000']],
+            ],
+        ]);
+        $sheet3->getStyle("A{$totalRow3}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+
+        $sheet3->getStyle("A4:I{$end3}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('E2E8F0');
+        $sheet3->getStyle("A4:C{$end3}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet3->getStyle("E4:E{$totalRow3}")->getNumberFormat()->setFormatCode('#,##0');
+        $sheet3->getStyle("F4:F{$totalRow3}")->getNumberFormat()->setFormatCode('#,##0 "₸"');
+
+        foreach (range('A', 'I') as $col) {
+            $sheet3->getColumnDimension($col)->setAutoSize(true);
         }
 
         $spreadsheet->setActiveSheetIndex(0);

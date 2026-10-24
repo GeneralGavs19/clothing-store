@@ -229,9 +229,34 @@ class QuickSaleAndAnalyticsTest extends TestCase
         $searchResp->assertStatus(200);
         $this->assertCount(1, $searchResp->json('data'));
 
-        // 5. Test Excel download
+        // 5. Test Excel download and headers
         $excelResp = $this->get('/api/reports/sales.xlsx', $headers);
         $excelResp->assertStatus(200);
         $excelResp->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+        ob_start();
+        $excelResp->sendContent();
+        $excelContent = ob_get_clean();
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'test_xlsx_');
+        file_put_contents($tmpFile, $excelContent);
+
+        $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xlsx();
+        $spreadsheet = $reader->load($tmpFile);
+        $sheet = $spreadsheet->getSheetByName('Продажи товаров (детально)');
+        $this->assertNotNull($sheet);
+
+        $row7Headers = [];
+        foreach (range('A', 'N') as $col) {
+            $row7Headers[] = $sheet->getCell($col.'7')->getValue();
+        }
+
+        $this->assertContains('Название товара (вещи)', $row7Headers);
+        $this->assertContains('Дата продажи', $row7Headers);
+        $this->assertContains('Общая цена продажи, ₸', $row7Headers);
+        $this->assertNotContains('Создана', $row7Headers);
+        $this->assertNotContains('Оформлена', $row7Headers);
+
+        unlink($tmpFile);
     }
 }
