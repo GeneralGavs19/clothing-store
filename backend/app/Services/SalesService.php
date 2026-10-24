@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Category;
 use App\Models\DailyStat;
 use App\Models\Product;
 use App\Models\ProductItem;
@@ -76,6 +77,7 @@ class SalesService
                     'product_id' => $product->id,
                     'product_variant_id' => $variant->id,
                     'product_name' => $product->name,
+                    'product_type' => $product->type,
                     'product_sku' => $variant->sku,
                     'quantity' => $quantity,
                     'source_location' => $source,
@@ -137,6 +139,7 @@ class SalesService
             'product_item_id' => $productItem->id,
             'product_item_code' => $productItem->code,
             'product_name' => $product->name,
+            'product_type' => $product->type,
             'product_sku' => $variant->sku,
             'quantity' => 1,
             'source_location' => $source,
@@ -206,13 +209,6 @@ class SalesService
                 if (! $variant || ! $product) {
                     throw ValidationException::withMessages([
                         'stock' => 'Недостаточно данных по варианту для одобрения.',
-                    ]);
-                }
-
-                $available = $source === 'stock' ? $variant->stock_warehouse : $variant->stock_store;
-                if ($available < $item->quantity) {
-                    throw ValidationException::withMessages([
-                        'stock' => "Недостаточно остатка для «{$product->name}».",
                     ]);
                 }
             }
@@ -474,17 +470,6 @@ class SalesService
             if (! $product) {
                 throw ValidationException::withMessages(['items' => 'Товар недоступен для продажи.']);
             }
-
-            $available = $source === 'stock'
-                ? (int) $variant->stock_warehouse
-                : (int) $variant->stock_store;
-
-            if ($quantity > $available) {
-                $place = $source === 'stock' ? 'складе' : 'в магазине';
-                throw ValidationException::withMessages([
-                    'items' => "На {$place} только {$available} шт. для «{$product->name}» ({$variant->size}).",
-                ]);
-            }
         }
     }
 
@@ -545,5 +530,174 @@ class SalesService
         } else {
             $variant->stock_store += $quantity;
         }
+    }
+
+    public function createQuickSale(User $cashier, array $data): array
+    {
+        return DB::transaction(function () use ($cashier, $data) {
+            $name = trim(strip_tags((string) ($data['name'] ?? '')));
+            $type = isset($data['type']) && trim((string) $data['type']) !== ''
+                ? trim(strip_tags((string) $data['type']))
+                : null;
+            $size = trim(strip_tags((string) ($data['size'] ?? '')));
+            if ($size === '') {
+                $size = 'Универсальный';
+            }
+            $color = isset($data['color']) && trim((string) $data['color']) !== ''
+                ? trim(strip_tags((string) $data['color']))
+                : null;
+
+            $categoryId = ! empty($data['category_id']) ? (int) $data['category_id'] : null;
+            if (! $categoryId && ! empty($data['category_name'])) {
+                $catName = trim(strip_tags((string) $data['category_name']));
+                $category = Category::firstOrCreate(
+                    ['name' => $catName],
+                    ['slug' => Str::slug($catName) ?: 'cat-'.Str::random(6), 'created_by' => $cashier->id]
+                );
+                $categoryId = $category->id;
+            }
+
+            $salePrice = max(0, (float) ($data['sale_price'] ?? 0));
+            $purchasePrice = max(0, (float) ($data['purchase_price'] ?? 0));
+            $quantity = max(1, (int) ($data['quantity'] ?? 1));
+            $remainingStock = max(0, (int) ($data['remaining_stock'] ?? 0));
+
+            // Check if product exists
+            $productQuery = Product::query()->where('name', $name);
+            if ($categoryId) {
+                $productQuery->where('category_id', $categoryId);
+            }
+            if ($type) {
+                $productQuery->where('type', $type);
+            }
+            $product = $productQuery->lockForUpdate()->first();
+
+            if (! $product) {
+                $product = Product::create([
+                    'category_id' => $categoryId,
+                    'type' => $type,
+                    'name' => $name,
+                    'color' => $color,
+                    'sale_price' => $salePrice,
+                    'base_sale_price' => $salePrice,
+                    'purchase_price' => $purchasePrice,
+                    'stock_quantity' => 0,
+                    'display_quantity' => $remainingStock,
+                    'status' => 'active',
+                    'created_by' => $cashier->id,
+                ]);
+            } else {
+                if ($type && empty($product->type)) {
+                    $product->type = $type;
+                }
+                if ($color && empty($product->color)) {
+                    $product->color = $color;
+                }
+                if ($salePrice > 0 && (float) $product->sale_price <= 0) {
+                    $product->sale_price = $salePrice;
+                }
+                $product->save();
+            }
+
+            // Check if variant exists
+            $variant = ProductVariant::query()
+                ->where('product_id', $product->id)
+                ->where('size', $size)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $variant) {
+                $category = $product->category_id ? Category::find($product->category_id) : null;
+                $sku = $this->generateSku($category?->name, $product->name, $size);
+
+                $variant = ProductVariant::create([
+                    'product_id' => $product->id,
+                    'size' => $size,
+                    'color' => $product->color,
+                    'sku' => $sku,
+                    'stock_warehouse' => 0,
+                    'stock_store' => $remainingStock,
+                    'low_stock_threshold' => 0,
+                    'sale_price' => $salePrice > 0 ? $salePrice : (float) $product->sale_price,
+                    'purchase_price' => $purchasePrice > 0 ? $purchasePrice : (float) $product->purchase_price,
+                    'position' => (int) $product->variants()->count(),
+                ]);
+            } else {
+                if ($remainingStock > 0) {
+                    $variant->stock_store = $remainingStock;
+                    $variant->save();
+                }
+            }
+
+            $product->applyAggregatesFromVariants();
+            $product->save();
+
+            // Record sale
+            $soldAt = now();
+            $finalSalePrice = $salePrice > 0 ? $salePrice : (float) $variant->sale_price;
+            $finalPurchasePrice = $purchasePrice > 0 ? $purchasePrice : (float) $variant->purchase_price;
+            $lineTotal = round($finalSalePrice * $quantity, 2);
+            $lineProfit = round(($finalSalePrice - $finalPurchasePrice) * $quantity, 2);
+
+            $sale = Sale::create([
+                'number' => 'draft-'.Str::uuid()->toString(),
+                'cashier_id' => $cashier->id,
+                'status' => 'approved',
+                'approved_by' => $cashier->id,
+                'approved_at' => $soldAt,
+                'submitted_at' => $soldAt,
+                'subtotal' => $lineTotal,
+                'profit' => $lineProfit,
+                'cashier_note' => isset($data['cashier_note']) ? strip_tags($data['cashier_note']) : null,
+            ]);
+
+            $sale->items()->create([
+                'product_id' => $product->id,
+                'product_variant_id' => $variant->id,
+                'product_name' => $product->name,
+                'product_type' => $product->type,
+                'product_sku' => $variant->sku,
+                'quantity' => $quantity,
+                'source_location' => 'display',
+                'variant_size' => $variant->size,
+                'purchase_price' => $finalPurchasePrice,
+                'sale_price' => $finalSalePrice,
+                'line_total' => $lineTotal,
+                'line_profit' => $lineProfit,
+            ]);
+
+            $variant->stock_store = $remainingStock;
+            $variant->save();
+
+            $product->applyAggregatesFromVariants();
+            $product->save();
+
+            $sale->update([
+                'number' => $this->humanNumber($sale->id, $soldAt, $quantity, $lineTotal),
+            ]);
+
+            $this->recordStockMovement($sale, $cashier, $product, -1 * $quantity, 'Быстрая продажа №'.$sale->id);
+            $this->recordDailyStats($sale->fresh(['items']), $soldAt);
+
+            return [
+                'sale' => $sale->load(['items.product.category', 'cashier']),
+                'product' => $product->fresh(['category', 'variants']),
+            ];
+        });
+    }
+
+    private function generateSku(?string $categoryName, string $productName, string $size): string
+    {
+        $slug = Str::slug($productName.'-'.$size) ?: 'item';
+        $base = strtoupper(substr($slug, 0, 24));
+        $candidate = $base;
+        $i = 1;
+
+        while (ProductVariant::query()->where('sku', $candidate)->exists()) {
+            $candidate = $base.'-'.$i;
+            $i++;
+        }
+
+        return $candidate;
     }
 }

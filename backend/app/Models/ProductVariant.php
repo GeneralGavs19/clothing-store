@@ -31,9 +31,37 @@ class ProductVariant extends Model
         'position' => 'integer',
     ];
 
+    protected $appends = ['total_sold', 'initial_quantity'];
+
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function saleItems(): HasMany
+    {
+        return $this->hasMany(SaleItem::class);
+    }
+
+    public function getTotalSoldAttribute(): int
+    {
+        if (array_key_exists('total_sold', $this->attributes)) {
+            return (int) $this->attributes['total_sold'];
+        }
+
+        if ($this->relationLoaded('saleItems')) {
+            return (int) $this->saleItems->sum('quantity');
+        }
+
+        return (int) SaleItem::query()
+            ->where('product_variant_id', $this->id)
+            ->whereHas('sale', fn ($q) => $q->where('status', 'approved'))
+            ->sum('quantity');
+    }
+
+    public function getInitialQuantityAttribute(): int
+    {
+        return (int) $this->stockTotal() + (int) $this->total_sold;
     }
 
     public function items(): HasMany

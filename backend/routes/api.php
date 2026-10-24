@@ -25,6 +25,7 @@ Route::middleware('jwt')->group(function () {
     Route::get('categories', [CategoryController::class, 'index']);
     Route::get('categories/{category}', [CategoryController::class, 'show']);
     Route::post('sales', [SaleController::class, 'store']);
+    Route::post('sales/quick', [SaleController::class, 'quickSale']);
     Route::get('sales', [SaleController::class, 'index']);
 
     Route::middleware('role:admin,admin_programmer')->group(function () {
@@ -43,6 +44,7 @@ Route::middleware('jwt')->group(function () {
         Route::post('stock/transfer', [StockController::class, 'transfer']);
         Route::post('stock/adjust', [StockController::class, 'adjust']);
 
+        Route::get('reports/analytics', [ReportController::class, 'analytics']);
         Route::get('reports/sales.xlsx', [ReportController::class, 'salesExcel']);
         Route::get('reports/backup', [ReportController::class, 'backup']);
         Route::post('reports/rebuild-statistics', [ReportController::class, 'rebuildStatistics']);

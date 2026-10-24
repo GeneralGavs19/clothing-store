@@ -71,6 +71,32 @@ class SaleController extends Controller
         return response()->json($sale, 201);
     }
 
+    public function quickSale(Request $request, SalesService $sales, ActivityLogger $logger)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:180'],
+            'type' => ['nullable', 'string', 'max:100'],
+            'category_id' => ['nullable', 'exists:categories,id'],
+            'category_name' => ['nullable', 'string', 'max:100'],
+            'size' => ['required', 'string', 'max:64'],
+            'color' => ['nullable', 'string', 'max:64'],
+            'sale_price' => ['required', 'numeric', 'min:0'],
+            'purchase_price' => ['nullable', 'numeric', 'min:0'],
+            'quantity' => ['required', 'integer', 'min:1'],
+            'remaining_stock' => ['nullable', 'integer', 'min:0'],
+            'cashier_note' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $result = $sales->createQuickSale($request->user(), $data);
+
+        $logger->log('sales.quick_created', $result['sale'], [
+            'number' => $result['sale']->number,
+            'product_name' => $result['product']->name,
+        ], $request);
+
+        return response()->json($result, 201);
+    }
+
     public function pending(Request $request)
     {
         $query = Sale::query()

@@ -2,11 +2,15 @@
   <div class="space-y-5">
     <section class="panel p-4">
       <div class="flex flex-col gap-3">
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <input v-model="filters.search" class="input" placeholder="Поиск по названию, цвету, размеру..." @input="debouncedFetch" />
           <select v-model="filters.category_id" class="select" @change="fetchProducts(1)">
             <option value="">Все категории</option>
             <option v-for="category in catalog.categories" :key="category.id" :value="category.id">{{ category.name }}</option>
+          </select>
+          <select v-model="filters.type" class="select" @change="fetchProducts(1)">
+            <option value="">Все виды</option>
+            <option v-for="type in popularTypes" :key="type" :value="type">{{ type }}</option>
           </select>
           <select v-model="filters.status" class="select" @change="fetchProducts(1)">
             <option value="">Все статусы</option>
@@ -51,11 +55,21 @@
             <RouterLink :to="{ name: 'product-detail', params: { id: product.id } }" class="min-w-0 flex-1 text-left">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-medium leading-snug">{{ product.name }}</span>
+                <span v-if="product.type" class="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                  {{ product.type }}
+                </span>
                 <span class="badge shrink-0" :class="statusClass(product.status)">{{ statusLabel(product.status) }}</span>
               </div>
               <p class="mt-1 text-xs leading-relaxed text-slate-500">
                 {{ variantSummaryLine(product) }}
               </p>
+              <div class="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                <span class="rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                  Было: {{ product.initial_quantity || (product.display_quantity + product.stock_quantity) }} шт.
+                </span>
+                <span>Продано: {{ product.total_sold || 0 }} шт.</span>
+                <span>Остаток: {{ product.display_quantity + product.stock_quantity }} шт.</span>
+              </div>
             </RouterLink>
           </div>
           <div class="product-row__aside">
@@ -109,6 +123,13 @@
         <label class="block sm:col-span-2">
           <span class="mb-1 block text-sm font-medium">Название</span>
           <input v-model="form.name" class="input" required />
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-sm font-medium">Вид товара</span>
+          <input v-model="form.type" class="input" list="products-view-types" placeholder="Футболка, Худи, Джинсы…" />
+          <datalist id="products-view-types">
+            <option v-for="t in popularTypes" :key="t" :value="t" />
+          </datalist>
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium">Цвет</span>
@@ -257,7 +278,26 @@ const saving = ref(false)
 const importing = ref(false)
 const editing = ref(null)
 const variantTableRef = ref(null)
-const filters = reactive({ search: '', category_id: '', status: '', sort: 'updated_at', direction: 'desc', page: 1, per_page: 12 })
+const popularTypes = [
+  'Футболка',
+  'Худи',
+  'Свитшот',
+  'Джинсы',
+  'Штаны',
+  'Шорты',
+  'Куртка',
+  'Рубашка',
+  'Поло',
+  'Платье',
+  'Юбка',
+  'Костюм',
+  'Обувь',
+  'Кроссовки',
+  'Кепка',
+  'Аксессуары',
+]
+
+const filters = reactive({ search: '', category_id: '', type: '', status: '', sort: 'updated_at', direction: 'desc', page: 1, per_page: 12 })
 const form = reactive(emptyForm())
 const importForm = reactive({ category_id: '', file: null })
 let debounce
@@ -271,6 +311,7 @@ function blankVariant() {
 function emptyForm() {
   return {
     name: '',
+    type: '',
     color: '',
     sale_price: '',
     variants: [blankVariant()],
@@ -301,6 +342,7 @@ function resetForm(product = null) {
   Object.assign(form, base)
   if (product) {
     form.name = product.name ?? ''
+    form.type = product.type ?? ''
     form.color = product.color ?? ''
     form.sale_price = product.sale_price != null ? product.sale_price : ''
     form.category_id = product.category_id ?? ''
@@ -329,7 +371,14 @@ function openImport() {
 }
 
 function params(page = filters.page) {
-  return { ...filters, page, category_id: filters.category_id || undefined, status: filters.status || undefined, search: filters.search || undefined }
+  return {
+    ...filters,
+    page,
+    category_id: filters.category_id || undefined,
+    type: filters.type || undefined,
+    status: filters.status || undefined,
+    search: filters.search || undefined,
+  }
 }
 
 async function fetchProducts(page = 1) {
@@ -359,6 +408,7 @@ async function saveProduct() {
     if (!variants.length) throw new Error('Добавьте хотя бы один размер.')
     const payload = {
       name: form.name,
+      type: form.type || null,
       color: form.color,
       sale_price: form.sale_price,
       category_id: form.category_id,

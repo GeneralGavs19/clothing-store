@@ -34,6 +34,9 @@ export const useSalesStore = defineStore('sales', {
     async create(payload) {
       return api.post('/sales', payload)
     },
+    async createQuick(payload) {
+      return api.post('/sales/quick', payload)
+    },
     async approve(id, admin_note = '') {
       return api.post(`/sales/${id}/approve`, { admin_note })
     },

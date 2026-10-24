@@ -19,6 +19,9 @@
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2">
               <h1 class="text-2xl font-semibold tracking-tight">{{ product.name }}</h1>
+              <span v-if="product.type" class="rounded bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                {{ product.type }}
+              </span>
               <span class="badge" :class="statusClass(product.status)">{{ statusLabel(product.status) }}</span>
             </div>
             <p class="mt-1 text-sm text-slate-500">
@@ -30,8 +33,9 @@
             </p>
             <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
               <Stat label="Цена" :value="money(product.sale_price)" />
-              <Stat label="В магазине" :value="String(product.display_quantity ?? 0)" />
-              <Stat label="Всего единиц" :value="String(totalItems)" />
+              <Stat label="Было учтено" :value="`${product.initial_quantity || ((product.stock_quantity ?? 0) + (product.display_quantity ?? 0))} шт.`" />
+              <Stat label="Продано" :value="`${product.total_sold || 0} шт.`" />
+              <Stat label="Текущий остаток" :value="`${totalItems} шт.`" />
             </div>
           </div>
         </div>
@@ -39,21 +43,29 @@
 
       <section class="panel overflow-hidden">
         <div class="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-          <h2 class="font-semibold">Размеры и остатки</h2>
+          <h2 class="font-semibold">Размеры, продажи и остатки</h2>
         </div>
         <div class="overflow-x-auto">
           <table class="min-w-full text-sm">
             <thead class="bg-slate-50 text-xs text-slate-500 dark:bg-slate-900">
               <tr>
                 <th class="px-4 py-2.5 text-left font-medium">Размер</th>
+                <th class="px-4 py-2.5 text-right font-medium">Было учтено</th>
+                <th class="px-4 py-2.5 text-right font-medium text-emerald-600 dark:text-emerald-400">Продано</th>
                 <th class="px-4 py-2.5 text-right font-medium">В магазине</th>
                 <th class="px-4 py-2.5 text-right font-medium">На складе</th>
-                <th class="px-4 py-2.5 text-right font-medium">Всего</th>
+                <th class="px-4 py-2.5 text-right font-medium">Остаток всего</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-200 dark:divide-slate-800">
               <tr v-for="variant in product.variants || []" :key="variant.id">
                 <td class="px-4 py-3 font-medium">{{ variant.size }}</td>
+                <td class="px-4 py-3 text-right font-bold text-slate-900 dark:text-slate-100 tabular-nums">
+                  {{ variant.initial_quantity || ((variant.stock_store ?? 0) + (variant.stock_warehouse ?? 0)) }}
+                </td>
+                <td class="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                  {{ variant.total_sold || 0 }}
+                </td>
                 <td class="px-4 py-3 text-right tabular-nums">{{ variant.stock_store ?? 0 }}</td>
                 <td class="px-4 py-3 text-right tabular-nums text-slate-500">{{ variant.stock_warehouse ?? 0 }}</td>
                 <td class="px-4 py-3 text-right font-semibold tabular-nums">{{ (variant.stock_store ?? 0) + (variant.stock_warehouse ?? 0) }}</td>

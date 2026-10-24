@@ -25,10 +25,14 @@ class ProductController extends Controller
             ->with(['category', 'variants'])
             ->withCount([
                 'variants as variants_count',
-            ]);
+            ])
+            ->withSum([
+                'saleItems as total_sold' => fn ($q) => $q->whereHas('sale', fn ($sq) => $sq->where('status', 'approved')),
+            ], 'quantity');
 
         if ($search = $request->string('search')->trim()->toString()) {
             $query->where(fn ($q) => $q->where('name', 'like', "%{$search}%")
+                ->orWhere('type', 'like', "%{$search}%")
                 ->orWhere('brand', 'like', "%{$search}%")
                 ->orWhere('description', 'like', "%{$search}%")
                 ->orWhere('color', 'like', "%{$search}%")
@@ -41,6 +45,10 @@ class ProductController extends Controller
 
         if ($request->filled('category_id')) {
             $query->where('category_id', $request->integer('category_id'));
+        }
+
+        if ($request->filled('type')) {
+            $query->where('type', $request->string('type')->toString());
         }
 
         if ($request->filled('status')) {
@@ -304,6 +312,7 @@ class ProductController extends Controller
     {
         $productRules = [
             'category_id' => ['nullable', 'exists:categories,id'],
+            'type' => ['nullable', 'string', 'max:100'],
             'name' => [$product ? 'sometimes' : 'required', 'string', 'max:180'],
             'color' => ['nullable', 'string', 'max:64'],
             'description' => ['nullable', 'string', 'max:3000'],
@@ -330,7 +339,7 @@ class ProductController extends Controller
         }
         unset($data['base_sale_price']);
 
-        foreach (['name', 'color', 'description'] as $field) {
+        foreach (['name', 'type', 'color', 'description'] as $field) {
             if (isset($data[$field])) {
                 $data[$field] = strip_tags((string) $data[$field]);
             }

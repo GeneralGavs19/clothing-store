@@ -13,6 +13,7 @@ class Product extends Model
 
     protected $fillable = [
         'category_id',
+        'type',
         'name',
         'brand',
         'color',
@@ -37,7 +38,7 @@ class Product extends Model
         'low_stock_threshold' => 'integer',
     ];
 
-    protected $appends = ['total_quantity', 'photo_url', 'size'];
+    protected $appends = ['total_quantity', 'total_sold', 'initial_quantity', 'photo_url', 'size'];
 
     public function category()
     {
@@ -57,6 +58,27 @@ class Product extends Model
     public function getTotalQuantityAttribute(): int
     {
         return (int) $this->stock_quantity + (int) $this->display_quantity;
+    }
+
+    public function getTotalSoldAttribute(): int
+    {
+        if (array_key_exists('total_sold', $this->attributes)) {
+            return (int) $this->attributes['total_sold'];
+        }
+
+        if ($this->relationLoaded('saleItems')) {
+            return (int) $this->saleItems->sum('quantity');
+        }
+
+        return (int) SaleItem::query()
+            ->where('product_id', $this->id)
+            ->whereHas('sale', fn ($q) => $q->where('status', 'approved'))
+            ->sum('quantity');
+    }
+
+    public function getInitialQuantityAttribute(): int
+    {
+        return (int) $this->total_quantity + (int) $this->total_sold;
     }
 
     public function getPhotoUrlAttribute(): ?string
