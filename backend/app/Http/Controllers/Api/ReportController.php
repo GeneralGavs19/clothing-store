@@ -25,36 +25,153 @@ class ReportController extends Controller
 
         $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle('Продажи');
+        $sheet->setTitle('Товары в заказах');
 
-        $headers = ['№ продажи', 'Статус', 'Кассир', 'Выручка, ₸', 'Прибыль, ₸', 'Создана', 'Оформлена'];
+        $headers = [
+            '№ продажи',
+            'Дата',
+            'Тип заказа',
+            'Название товара',
+            'Вид товара',
+            'Размер',
+            'Кол-во, шт.',
+            'Цена за шт., ₸',
+            'Сумма, ₸',
+            'Кассир',
+            'Примечание',
+            'Статус',
+        ];
         $sheet->fromArray($headers, null, 'A1');
+        $sheet->getStyle('A1:L1')->getFont()->setBold(true);
 
         $rowIndex = 2;
-        Sale::query()
-            ->with('cashier')
+        $salesQuery = Sale::query()
+            ->with(['items.product', 'cashier']);
+
+        if ($request->user()->isCashier()) {
+            $salesQuery->where('cashier_id', $request->user()->id);
+        }
+
+        $salesQuery
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')->toString()))
-            ->when($request->filled('date_from'), fn ($q) => $q->whereDate('created_at', '>=', $request->date('date_from')))
-            ->when($request->filled('date_to'), fn ($q) => $q->whereDate('created_at', '<=', $request->date('date_to')))
-            ->orderByDesc('created_at')
-            ->chunk(200, function ($sales) use ($sheet, &$rowIndex) {
-                foreach ($sales as $sale) {
+            ->when($request->filled('is_on_order'), fn ($q) => $q->where('is_on_order', $request->boolean('is_on_order')))
+            ->when($request->filled('date_from'), fn ($q) => $q->whereDate('approved_at', '>=', $request->date('date_from')))
+            ->when($request->filled('date_to'), fn ($q) => $q->whereDate('approved_at', '<=', $request->date('date_to')))
+            ->orderByDesc('approved_at')
+            ->orderByDesc('id');
+
+        $salesQuery->chunk(150, function ($sales) use ($sheet, &$rowIndex) {
+            foreach ($sales as $sale) {
+                $orderType = $sale->is_on_order ? 'На заказ' : 'В наличии';
+                $dateStr = ($sale->approved_at ?? $sale->created_at)?->format('d.m.Y H:i') ?? '—';
+                $statusLabel = match ($sale->status) {
+                    'approved' => 'Оформлен',
+                    'rejected' => 'Отменён',
+                    default => 'В ожидании',
+                };
+                $saleNum = '№'.$sale->id;
+
+                if ($sale->items->isEmpty()) {
                     $sheet->fromArray([
-                        $sale->number,
-                        $sale->status,
-                        $sale->cashier?->name,
+                        $saleNum,
+                        $dateStr,
+                        $orderType,
+                        'Без товаров',
+                        '—',
+                        '—',
+                        0,
                         (float) $sale->subtotal,
-                        (float) $sale->profit,
-                        optional($sale->submitted_at)?->format('d.m.Y H:i'),
-                        optional($sale->approved_at)?->format('d.m.Y H:i'),
+                        (float) $sale->subtotal,
+                        $sale->cashier?->name ?? '—',
+                        $sale->cashier_note ?? '—',
+                        $statusLabel,
+                    ], null, 'A'.$rowIndex);
+                    $rowIndex++;
+                    continue;
+                }
+
+                foreach ($sale->items as $item) {
+                    $sheet->fromArray([
+                        $saleNum,
+                        $dateStr,
+                        $orderType,
+                        $item->product_name ?: $item->product?->name ?: 'Удалённый товар',
+                        $item->product_type ?: $item->product?->type ?: '—',
+                        $item->variant_size ?: '—',
+                        (int) $item->quantity,
+                        (float) $item->sale_price,
+                        (float) $item->line_total,
+                        $sale->cashier?->name ?? '—',
+                        $sale->cashier_note ?? '—',
+                        $statusLabel,
                     ], null, 'A'.$rowIndex);
                     $rowIndex++;
                 }
-            });
+            }
+        });
 
-        foreach (range('A', 'G') as $column) {
+        foreach (range('A', 'L') as $column) {
             $sheet->getColumnDimension($column)->setAutoSize(true);
         }
+
+        // Вторая вкладка: Сводка по чекам
+        $sheet2 = $spreadsheet->createSheet();
+        $sheet2->setTitle('Сводка по чекам');
+        $headers2 = [
+            '№ продажи',
+            'Дата',
+            'Тип заказа',
+            'Состав заказа (Товары и размеры)',
+            'Всего шт.',
+            'Сумма чека, ₸',
+            'Кассир',
+            'Примечание',
+            'Статус',
+        ];
+        $sheet2->fromArray($headers2, null, 'A1');
+        $sheet2->getStyle('A1:I1')->getFont()->setBold(true);
+
+        $r2 = 2;
+        $salesQuery->chunk(150, function ($sales) use ($sheet2, &$r2) {
+            foreach ($sales as $sale) {
+                $orderType = $sale->is_on_order ? 'На заказ' : 'В наличии';
+                $dateStr = ($sale->approved_at ?? $sale->created_at)?->format('d.m.Y H:i') ?? '—';
+                $statusLabel = match ($sale->status) {
+                    'approved' => 'Оформлен',
+                    'rejected' => 'Отменён',
+                    default => 'В ожидании',
+                };
+                $saleNum = '№'.$sale->id;
+
+                $itemsSummary = $sale->items->map(function ($it) {
+                    $name = $it->product_name ?: $it->product?->name ?: 'Товар';
+                    $sz = $it->variant_size ? " ({$it->variant_size})" : '';
+
+                    return "{$name}{$sz} × {$it->quantity} шт.";
+                })->implode(', ');
+
+                $totalQty = (int) $sale->items->sum('quantity');
+
+                $sheet2->fromArray([
+                    $saleNum,
+                    $dateStr,
+                    $orderType,
+                    $itemsSummary ?: '—',
+                    $totalQty,
+                    (float) $sale->subtotal,
+                    $sale->cashier?->name ?? '—',
+                    $sale->cashier_note ?? '—',
+                    $statusLabel,
+                ], null, 'A'.$r2);
+                $r2++;
+            }
+        });
+
+        foreach (range('A', 'I') as $column) {
+            $sheet2->getColumnDimension($column)->setAutoSize(true);
+        }
+
+        $spreadsheet->setActiveSheetIndex(0);
 
         return response()->streamDownload(function () use ($spreadsheet) {
             (new Xlsx($spreadsheet))->save('php://output');
@@ -145,6 +262,9 @@ class ReportController extends Controller
         if ($dateTo) {
             $salesQuery->whereDate('sales.approved_at', '<=', $dateTo);
         }
+        if ($request->has('is_on_order') && $request->input('is_on_order') !== null && $request->input('is_on_order') !== '') {
+            $salesQuery->where('sales.is_on_order', $request->boolean('is_on_order'));
+        }
 
         $saleItems = $salesQuery->get([
             'sale_items.id as sale_item_id',
@@ -159,6 +279,7 @@ class ReportController extends Controller
             'sale_items.sale_price',
             'sale_items.line_total',
             'sale_items.line_profit',
+            'sales.is_on_order as sale_is_on_order',
             'sales.approved_at',
             'products.name as live_product_name',
             'products.type as live_product_type',
@@ -379,6 +500,11 @@ class ReportController extends Controller
 
         $byProduct = collect($productsMap)->sortByDesc('sold_quantity')->values()->all();
 
+        $onOrderUnits = (int) $saleItems->filter(fn ($it) => (bool) $it->sale_is_on_order)->sum('quantity');
+        $inStockUnits = (int) $saleItems->filter(fn ($it) => ! (bool) $it->sale_is_on_order)->sum('quantity');
+        $onOrderRevenue = round((float) $saleItems->filter(fn ($it) => (bool) $it->sale_is_on_order)->sum('line_total'), 2);
+        $inStockRevenue = round((float) $saleItems->filter(fn ($it) => ! (bool) $it->sale_is_on_order)->sum('line_total'), 2);
+
         return response()->json([
             'summary' => [
                 'total_initial_items' => $totalInitialUnits,
@@ -388,6 +514,10 @@ class ReportController extends Controller
                 'total_profit' => round($totalProfit, 2),
                 'sales_count' => $uniqueSalesCount,
                 'average_check' => $averageCheck,
+                'on_order_units' => $onOrderUnits,
+                'in_stock_units' => $inStockUnits,
+                'on_order_revenue' => $onOrderRevenue,
+                'in_stock_revenue' => $inStockRevenue,
             ],
             'by_type' => $byType,
             'by_category' => $byCategory,

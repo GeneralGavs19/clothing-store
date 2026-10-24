@@ -32,6 +32,27 @@ class SaleController extends Controller
             $query->whereDate('approved_at', '<=', $request->date('date_to'));
         }
 
+        if ($search = $request->string('search')->trim()->toString()) {
+            $digits = preg_replace('/\D/', '', $search);
+            $query->where(function ($q) use ($search, $digits) {
+                if ($digits !== '') {
+                    $q->where('id', (int) $digits);
+                }
+                $q->orWhere('number', 'like', "%{$search}%")
+                    ->orWhere('cashier_note', 'like', "%{$search}%")
+                    ->orWhereHas('items', function ($iq) use ($search) {
+                        $iq->where('product_name', 'like', "%{$search}%")
+                            ->orWhere('variant_size', 'like', "%{$search}%")
+                            ->orWhere('product_type', 'like', "%{$search}%");
+                    })
+                    ->orWhereHas('cashier', fn ($cq) => $cq->where('name', 'like', "%{$search}%"));
+            });
+        }
+
+        if ($request->has('is_on_order') && $request->input('is_on_order') !== null && $request->input('is_on_order') !== '') {
+            $query->where('is_on_order', $request->boolean('is_on_order'));
+        }
+
         $query->orderByDesc('approved_at')->orderByDesc('id');
 
         return response()->json(ApiPagination::format($query->paginate($request->integer('per_page', 15))));
@@ -46,6 +67,7 @@ class SaleController extends Controller
             'items.*.product_item_id' => ['nullable', 'exists:product_items,id'],
             'items.*.quantity' => ['nullable', 'integer', 'min:1'],
             'items.*.source' => ['nullable', 'in:display,stock'],
+            'is_on_order' => ['nullable', 'boolean'],
             'cashier_note' => ['nullable', 'string', 'max:1000'],
         ]);
 
@@ -63,7 +85,8 @@ class SaleController extends Controller
         $sale = $sales->createCompleted(
             $request->user(),
             $data['items'],
-            isset($data['cashier_note']) ? strip_tags($data['cashier_note']) : null
+            isset($data['cashier_note']) ? strip_tags($data['cashier_note']) : null,
+            (bool) ($data['is_on_order'] ?? false)
         );
 
         $logger->log('sales.created', $sale, ['number' => $sale->number], $request);
@@ -84,6 +107,7 @@ class SaleController extends Controller
             'purchase_price' => ['nullable', 'numeric', 'min:0'],
             'quantity' => ['required', 'integer', 'min:1'],
             'remaining_stock' => ['nullable', 'integer', 'min:0'],
+            'is_on_order' => ['nullable', 'boolean'],
             'cashier_note' => ['nullable', 'string', 'max:1000'],
         ]);
 

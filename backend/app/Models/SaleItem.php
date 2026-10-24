@@ -19,6 +19,7 @@ class SaleItem extends Model
         'product_type',
         'product_sku',
         'quantity',
+        'is_on_order',
         'source_location',
         'variant_size',
         'purchase_price',
@@ -31,6 +32,7 @@ class SaleItem extends Model
 
     protected $casts = [
         'quantity' => 'integer',
+        'is_on_order' => 'boolean',
         'purchase_price' => 'decimal:2',
         'sale_price' => 'decimal:2',
         'line_total' => 'decimal:2',

@@ -19,9 +19,9 @@ class SalesService
 {
     public function __construct(private ProductItemService $itemService) {}
 
-    public function createCompleted(User $cashier, array $items, ?string $note = null): Sale
+    public function createCompleted(User $cashier, array $items, ?string $note = null, bool $isOnOrder = false): Sale
     {
-        return DB::transaction(function () use ($cashier, $items, $note) {
+        return DB::transaction(function () use ($cashier, $items, $note, $isOnOrder) {
             $itemIds = collect($items)->pluck('product_item_id')->filter()->unique()->values();
             $productItems = ProductItem::query()->whereIn('id', $itemIds)->lockForUpdate()->get()->keyBy('id');
 
@@ -41,6 +41,7 @@ class SalesService
                 'number' => 'draft-'.Str::uuid()->toString(),
                 'cashier_id' => $cashier->id,
                 'status' => 'approved',
+                'is_on_order' => $isOnOrder,
                 'approved_by' => $cashier->id,
                 'approved_at' => $soldAt,
                 'submitted_at' => $soldAt,
@@ -80,6 +81,7 @@ class SalesService
                     'product_type' => $product->type,
                     'product_sku' => $variant->sku,
                     'quantity' => $quantity,
+                    'is_on_order' => $isOnOrder,
                     'source_location' => $source,
                     'variant_size' => $variantLabel,
                     'purchase_price' => $purchase,
@@ -639,10 +641,13 @@ class SalesService
             $lineTotal = round($finalSalePrice * $quantity, 2);
             $lineProfit = round(($finalSalePrice - $finalPurchasePrice) * $quantity, 2);
 
+            $isOnOrder = ! empty($data['is_on_order']);
+
             $sale = Sale::create([
                 'number' => 'draft-'.Str::uuid()->toString(),
                 'cashier_id' => $cashier->id,
                 'status' => 'approved',
+                'is_on_order' => $isOnOrder,
                 'approved_by' => $cashier->id,
                 'approved_at' => $soldAt,
                 'submitted_at' => $soldAt,
@@ -658,6 +663,7 @@ class SalesService
                 'product_type' => $product->type,
                 'product_sku' => $variant->sku,
                 'quantity' => $quantity,
+                'is_on_order' => $isOnOrder,
                 'source_location' => 'display',
                 'variant_size' => $variant->size,
                 'purchase_price' => $finalPurchasePrice,

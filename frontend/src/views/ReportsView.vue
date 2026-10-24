@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-5">
-    <!-- Верхняя панель управления: фильтры по дате и экспорт -->
+    <!-- Верхняя панель управления: фильтры по дате, типу заказа и экспорт -->
     <section class="panel p-4">
       <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
@@ -11,6 +11,35 @@
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
+          <!-- Фильтр по типу заказа: Все / В наличии / На заказ -->
+          <div class="flex rounded-lg bg-slate-200/80 p-0.5 text-xs dark:bg-slate-800">
+            <button
+              type="button"
+              class="rounded-md px-2.5 py-1.5 font-medium transition"
+              :class="orderTypeFilter === '' ? 'bg-white shadow text-slate-900 dark:bg-slate-700 dark:text-white' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'"
+              @click="setOrderType('')"
+            >
+              Все заказы
+            </button>
+            <button
+              type="button"
+              class="rounded-md px-2.5 py-1.5 font-medium transition"
+              :class="orderTypeFilter === 'in_stock' ? 'bg-white shadow text-emerald-700 dark:bg-slate-700 dark:text-emerald-300' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'"
+              @click="setOrderType('in_stock')"
+            >
+              В наличии
+            </button>
+            <button
+              type="button"
+              class="flex items-center gap-1 rounded-md px-2.5 py-1.5 font-medium transition"
+              :class="orderTypeFilter === 'on_order' ? 'bg-amber-500 text-white shadow' : 'text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-white'"
+              @click="setOrderType('on_order')"
+            >
+              <span>📦</span>
+              <span>На заказ</span>
+            </button>
+          </div>
+
           <!-- Пресеты периодов -->
           <div class="flex rounded-lg bg-slate-100 p-0.5 text-xs dark:bg-slate-800">
             <button
@@ -39,11 +68,11 @@
           <button
             type="button"
             class="btn-muted h-8 px-2.5 text-xs"
-            title="Скачать Excel отчет"
-            @click="download('/reports/sales.xlsx', 'sales-report.xlsx')"
+            title="Скачать Excel отчет с названиями товаров и типами заказов"
+            @click="downloadExcelReport"
           >
             <Download class="h-3.5 w-3.5" />
-            Excel
+            Excel отчет
           </button>
 
           <button
@@ -59,7 +88,7 @@
       </div>
     </section>
 
-    <!-- Сводные карточки: Общий подсчет вещей и Общая статистика продаж -->
+    <!-- Сводные карточки: Подсчет вещей и статистика без себестоимости -->
     <section class="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
       <div class="panel border-emerald-200 bg-emerald-50/50 p-3.5 dark:border-emerald-900/60 dark:bg-emerald-950/20">
         <div class="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">Было всего вещей</div>
@@ -75,6 +104,22 @@
           {{ summary.total_sold_items || 0 }} <span class="text-xs font-normal text-slate-500">шт.</span>
         </div>
         <div class="mt-0.5 text-[10px] text-slate-500">За выбранный период</div>
+      </div>
+
+      <div class="panel border-slate-200 p-3.5">
+        <div class="text-[11px] font-medium text-slate-600 dark:text-slate-400">Из наличия</div>
+        <div class="mt-1 text-2xl font-black text-slate-900 dark:text-white tabular-nums">
+          {{ summary.in_stock_units || 0 }} <span class="text-xs font-normal text-slate-500">шт.</span>
+        </div>
+        <div class="mt-0.5 text-[10px] text-slate-500">{{ money(summary.in_stock_revenue) }}</div>
+      </div>
+
+      <div class="panel border-amber-200 bg-amber-50/40 p-3.5 dark:border-amber-900/50 dark:bg-amber-950/20">
+        <div class="text-[11px] font-medium text-amber-800 dark:text-amber-300">📦 На заказ</div>
+        <div class="mt-1 text-2xl font-black text-amber-900 dark:text-amber-200 tabular-nums">
+          {{ summary.on_order_units || 0 }} <span class="text-xs font-normal">шт.</span>
+        </div>
+        <div class="mt-0.5 text-[10px] text-amber-700 dark:text-amber-400">{{ money(summary.on_order_revenue) }}</div>
       </div>
 
       <div class="panel p-3.5">
@@ -93,28 +138,12 @@
         <div class="mt-0.5 text-[10px] text-sky-600 dark:text-sky-400">Сумма всех продаж</div>
       </div>
 
-      <div class="panel border-teal-200 bg-teal-50/40 p-3.5 dark:border-teal-900/50 dark:bg-teal-950/20">
-        <div class="text-[11px] font-medium text-teal-800 dark:text-teal-300">Общая прибыль</div>
-        <div class="mt-1 text-xl font-bold text-teal-950 dark:text-teal-100 tabular-nums sm:text-2xl">
-          {{ money(summary.total_profit) }}
-        </div>
-        <div class="mt-0.5 text-[10px] text-teal-600 dark:text-teal-400">После себестоимости</div>
-      </div>
-
       <div class="panel p-3.5">
         <div class="text-[11px] font-medium text-slate-500">Количество чеков</div>
         <div class="mt-1 text-2xl font-bold text-slate-900 dark:text-white tabular-nums">
           {{ summary.sales_count || 0 }}
         </div>
-        <div class="mt-0.5 text-[10px] text-slate-500">Всего оформлено</div>
-      </div>
-
-      <div class="panel p-3.5">
-        <div class="text-[11px] font-medium text-slate-500">Средний чек</div>
-        <div class="mt-1 text-lg font-bold text-slate-900 dark:text-white tabular-nums sm:text-xl">
-          {{ money(summary.average_check) }}
-        </div>
-        <div class="mt-0.5 text-[10px] text-slate-500">Выручка / Чеки</div>
+        <div class="mt-0.5 text-[10px] text-slate-500">Ср. чек: {{ money(summary.average_check) }}</div>
       </div>
     </section>
 
@@ -179,7 +208,6 @@
                 <th class="px-4 py-3 text-right text-emerald-600 dark:text-emerald-400">Продано</th>
                 <th class="px-4 py-3 text-right">Остаток</th>
                 <th class="px-4 py-3 text-right">Выручка</th>
-                <th class="px-4 py-3 text-right">Прибыль</th>
                 <th class="px-4 py-3 text-right">Доля в продажах</th>
                 <th class="px-4 py-3">Прогресс продаж</th>
               </tr>
@@ -204,9 +232,6 @@
                 </td>
                 <td class="px-4 py-3 text-right font-semibold text-slate-900 dark:text-white tabular-nums">
                   {{ money(item.revenue) }}
-                </td>
-                <td class="px-4 py-3 text-right font-semibold text-teal-600 dark:text-teal-400 tabular-nums">
-                  {{ money(item.profit) }}
                 </td>
                 <td class="px-4 py-3 text-right font-medium tabular-nums text-slate-700 dark:text-slate-300">
                   {{ item.revenue_percent }}%
@@ -247,7 +272,6 @@
                 <th class="px-4 py-3 text-right text-emerald-600 dark:text-emerald-400">Продано</th>
                 <th class="px-4 py-3 text-right">Остаток</th>
                 <th class="px-4 py-3 text-right">Выручка</th>
-                <th class="px-4 py-3 text-right">Прибыль</th>
                 <th class="px-4 py-3 text-right">Доля в продажах</th>
                 <th class="px-4 py-3">Прогресс продаж</th>
               </tr>
@@ -272,9 +296,6 @@
                 </td>
                 <td class="px-4 py-3 text-right font-semibold text-slate-900 dark:text-white tabular-nums">
                   {{ money(item.revenue) }}
-                </td>
-                <td class="px-4 py-3 text-right font-semibold text-teal-600 dark:text-teal-400 tabular-nums">
-                  {{ money(item.profit) }}
                 </td>
                 <td class="px-4 py-3 text-right font-medium tabular-nums text-slate-700 dark:text-slate-300">
                   {{ item.revenue_percent }}%
@@ -345,7 +366,6 @@
                   <span>Остаток: <strong class="text-slate-900 dark:text-white">{{ product.stock_quantity }}</strong> шт.</span>
                   <span class="text-slate-400">·</span>
                   <span>Выручка: <strong class="text-emerald-600 dark:text-emerald-400">{{ money(product.revenue) }}</strong></span>
-                  <span v-if="product.profit">Прибыль: <strong class="text-teal-600 dark:text-teal-400">{{ money(product.profit) }}</strong></span>
                 </div>
               </div>
 
@@ -390,7 +410,6 @@
                       <th class="px-3.5 py-2 text-right">Всего остаток</th>
                       <th class="px-3.5 py-2 text-right">Цена продажи</th>
                       <th class="px-3.5 py-2 text-right">Выручка</th>
-                      <th class="px-3.5 py-2 text-right">Прибыль</th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-slate-100 dark:divide-slate-900">
@@ -426,9 +445,6 @@
                       <td class="px-3.5 py-2.5 text-right font-semibold text-slate-900 dark:text-white tabular-nums">
                         {{ money(sz.revenue) }}
                       </td>
-                      <td class="px-3.5 py-2.5 text-right font-semibold text-teal-600 dark:text-teal-400 tabular-nums">
-                        {{ money(sz.profit) }}
-                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -455,6 +471,7 @@ const loading = ref(false)
 const activeTab = ref('types') // 'types' | 'categories' | 'products'
 const tabSearch = ref('')
 const activePeriod = ref('all') // 'all' | 'today' | '7days' | 'month' | 'custom'
+const orderTypeFilter = ref('') // '' (all) | 'in_stock' | 'on_order'
 const customDateFrom = ref('')
 const customDateTo = ref('')
 
@@ -530,6 +547,11 @@ function setPeriod(period) {
   fetchAnalytics()
 }
 
+function setOrderType(type) {
+  orderTypeFilter.value = type
+  fetchAnalytics()
+}
+
 async function fetchAnalytics() {
   loading.value = true
   try {
@@ -538,6 +560,12 @@ async function fetchAnalytics() {
       if (customDateFrom.value) params.date_from = customDateFrom.value
       if (customDateTo.value) params.date_to = customDateTo.value
     }
+    if (orderTypeFilter.value === 'on_order') {
+      params.is_on_order = true
+    } else if (orderTypeFilter.value === 'in_stock') {
+      params.is_on_order = false
+    }
+
     const { data } = await api.get('/reports/analytics', { params })
     analyticsData.value = data
   } catch (error) {
@@ -585,6 +613,30 @@ function money(value) {
 function percent(value, total) {
   if (!total) return '0%'
   return `${Math.min(100, Math.round((Number(value || 0) / Number(total)) * 100))}%`
+}
+
+async function downloadExcelReport() {
+  try {
+    const params = new URLSearchParams()
+    if (activePeriod.value !== 'all') {
+      if (customDateFrom.value) params.set('date_from', customDateFrom.value)
+      if (customDateTo.value) params.set('date_to', customDateTo.value)
+    }
+    if (orderTypeFilter.value === 'on_order') params.set('is_on_order', '1')
+    if (orderTypeFilter.value === 'in_stock') params.set('is_on_order', '0')
+
+    const url = `/reports/sales.xlsx?${params.toString()}`
+    const response = await api.get(url, { responseType: 'blob' })
+    const blobUrl = URL.createObjectURL(response.data)
+    const link = document.createElement('a')
+    link.href = blobUrl
+    link.download = `sales-report-${new Date().toISOString().slice(0, 10)}.xlsx`
+    link.click()
+    URL.revokeObjectURL(blobUrl)
+    toast.push('Excel отчет успешно скачан!')
+  } catch (error) {
+    toast.push(apiError(error), 'error')
+  }
 }
 
 async function download(endpoint, fallbackName) {

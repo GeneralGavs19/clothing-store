@@ -14,6 +14,7 @@ class Sale extends Model
         'cashier_id',
         'approved_by',
         'status',
+        'is_on_order',
         'subtotal',
         'profit',
         'cashier_note',
@@ -23,15 +24,21 @@ class Sale extends Model
         'rejected_at',
     ];
 
-    protected $appends = ['display_title', 'sold_at'];
+    protected $appends = ['display_title', 'sold_at', 'order_type_label'];
 
     protected $casts = [
+        'is_on_order' => 'boolean',
         'subtotal' => 'decimal:2',
         'profit' => 'decimal:2',
         'submitted_at' => 'datetime',
         'approved_at' => 'datetime',
         'rejected_at' => 'datetime',
     ];
+
+    public function getOrderTypeLabelAttribute(): string
+    {
+        return $this->is_on_order ? 'На заказ' : 'В наличии';
+    }
 
     public function getSoldAtAttribute(): ?string
     {

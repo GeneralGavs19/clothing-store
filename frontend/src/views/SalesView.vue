@@ -57,6 +57,40 @@
           </div>
 
           <form class="space-y-3.5" @submit.prevent="submitQuickSale">
+            <!-- Выбор: В наличии или На заказ -->
+            <div>
+              <label class="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                Тип продажи / заказа <span class="text-rose-500">*</span>
+              </label>
+              <div class="mt-1.5 grid grid-cols-2 gap-2 text-xs">
+                <button
+                  type="button"
+                  class="flex items-center justify-center gap-2 rounded-lg border p-2.5 font-medium transition"
+                  :class="!quickForm.is_on_order
+                    ? 'border-emerald-500 bg-emerald-50 text-emerald-900 shadow-sm dark:border-emerald-500 dark:bg-emerald-950/60 dark:text-emerald-200'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400'"
+                  @click="quickForm.is_on_order = false"
+                >
+                  <Check class="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                  <span class="font-semibold">В наличии</span>
+                  <span class="text-[10px] text-slate-400">(из магазина)</span>
+                </button>
+
+                <button
+                  type="button"
+                  class="flex items-center justify-center gap-2 rounded-lg border p-2.5 font-medium transition"
+                  :class="quickForm.is_on_order
+                    ? 'border-amber-500 bg-amber-50 text-amber-900 shadow-sm dark:border-amber-500 dark:bg-amber-950/60 dark:text-amber-200'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400'"
+                  @click="quickForm.is_on_order = true"
+                >
+                  <Package class="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                  <span class="font-semibold">📦 На заказ</span>
+                  <span class="text-[10px] text-slate-400">(предзаказ)</span>
+                </button>
+              </div>
+            </div>
+
             <!-- Название товара -->
             <div>
               <label class="block text-xs font-medium text-slate-700 dark:text-slate-300">
@@ -209,37 +243,21 @@
               </div>
             </div>
 
-            <!-- Себестоимость и Остаток -->
-            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300">
-                  Себестоимость / Закупка (₸)
-                </label>
-                <input
-                  v-model.number="quickForm.purchase_price"
-                  type="number"
-                  min="0"
-                  step="100"
-                  class="input mt-1 text-slate-600 dark:text-slate-400"
-                  placeholder="0 (если не учитывается)"
-                />
-              </div>
-
-              <div>
-                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300">
-                  Остаток после продажи (шт.)
-                </label>
-                <input
-                  v-model.number="quickForm.remaining_stock"
-                  type="number"
-                  min="0"
-                  class="input mt-1 text-slate-600 dark:text-slate-400"
-                  placeholder="0"
-                />
-                <p class="mt-1 text-[11px] text-slate-500">
-                  Если склад пока не знаете — оставьте 0.
-                </p>
-              </div>
+            <!-- Остаток после продажи (себестоимость полностью убрана) -->
+            <div>
+              <label class="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                Остаток после продажи (шт.)
+              </label>
+              <input
+                v-model.number="quickForm.remaining_stock"
+                type="number"
+                min="0"
+                class="input mt-1 text-slate-600 dark:text-slate-400"
+                placeholder="0"
+              />
+              <p class="mt-1 text-[11px] text-slate-500">
+                Сколько штук осталось на руках/складе. Если склад пока не знаете — оставьте 0.
+              </p>
             </div>
 
             <!-- Интерактивный расчет "Было" -->
@@ -265,10 +283,21 @@
                 </div>
               </div>
               <div class="mt-2.5 flex items-center justify-between border-t border-slate-200 pt-2 text-xs dark:border-slate-800">
-                <span class="text-slate-500">Сумма продажи:</span>
-                <span class="text-sm font-bold text-slate-900 dark:text-white">
-                  {{ money((Number(quickForm.sale_price) || 0) * (Number(quickForm.quantity) || 1)) }}
-                </span>
+                <div class="flex items-center gap-1.5">
+                  <span class="text-slate-500">Тип:</span>
+                  <span
+                    class="rounded px-1.5 py-0.5 text-[11px] font-semibold"
+                    :class="quickForm.is_on_order ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'"
+                  >
+                    {{ quickForm.is_on_order ? '📦 На заказ' : 'В наличии' }}
+                  </span>
+                </div>
+                <div>
+                  <span class="text-slate-500 mr-1.5">Сумма продажи:</span>
+                  <span class="text-sm font-bold text-slate-900 dark:text-white">
+                    {{ money((Number(quickForm.sale_price) || 0) * (Number(quickForm.quantity) || 1)) }}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -279,7 +308,7 @@
                 v-model="quickForm.cashier_note"
                 class="textarea mt-1"
                 rows="2"
-                placeholder="Необязательно (например: оплата Kaspi QR)"
+                placeholder="Необязательно (например: Kaspi QR, контакт клиента...)"
               />
             </div>
 
@@ -434,7 +463,38 @@
         />
 
         <form v-else class="space-y-4" @submit.prevent="createSale">
-          <div class="max-h-[26rem] space-y-2 overflow-y-auto pr-1">
+          <!-- Переключатель: В наличии / На заказ для чека -->
+          <div>
+            <label class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+              Тип заказа
+            </label>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <button
+                type="button"
+                class="flex items-center justify-center gap-1.5 rounded-lg border p-2 font-medium transition"
+                :class="!cartIsOnOrder
+                  ? 'border-emerald-500 bg-emerald-50 text-emerald-900 font-semibold shadow-sm dark:border-emerald-500 dark:bg-emerald-950/60 dark:text-emerald-200'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400'"
+                @click="cartIsOnOrder = false"
+              >
+                <Check class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                В наличии
+              </button>
+              <button
+                type="button"
+                class="flex items-center justify-center gap-1.5 rounded-lg border p-2 font-medium transition"
+                :class="cartIsOnOrder
+                  ? 'border-amber-500 bg-amber-50 text-amber-900 font-semibold shadow-sm dark:border-amber-500 dark:bg-amber-950/60 dark:text-amber-200'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400'"
+                @click="cartIsOnOrder = true"
+              >
+                <Package class="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                📦 На заказ
+              </button>
+            </div>
+          </div>
+
+          <div class="max-h-[24rem] space-y-2 overflow-y-auto pr-1">
             <div
               v-for="item in cart"
               :key="item.product_variant_id"
@@ -490,12 +550,21 @@
               v-model="cashierNote"
               class="textarea"
               rows="2"
-              placeholder="Необязательно (номер транзакции, способ оплаты...)"
+              placeholder="Необязательно (номер транзакции, способ оплаты, данные покупателя...)"
             />
           </label>
 
           <div class="rounded-lg bg-slate-50 p-3.5 dark:bg-slate-900/60">
             <div class="flex items-center justify-between text-xs text-slate-500">
+              <span>Тип заказа:</span>
+              <span
+                class="rounded px-2 py-0.5 font-semibold text-xs"
+                :class="cartIsOnOrder ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'"
+              >
+                {{ cartIsOnOrder ? '📦 На заказ' : 'В наличии' }}
+              </span>
+            </div>
+            <div class="mt-1 flex items-center justify-between text-xs text-slate-500">
               <span>Всего позиций:</span>
               <span class="font-medium text-slate-700 dark:text-slate-300">{{ totalCartUnits }} шт.</span>
             </div>
@@ -520,75 +589,238 @@
       </div>
     </section>
 
-    <!-- Нижняя секция: История оформленных продаж -->
+    <!-- Нижняя секция: Улучшенная история оформленных продаж -->
     <section class="panel overflow-hidden">
-      <div class="flex flex-col gap-3 border-b border-slate-200 p-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+      <!-- Заголовок панели истории -->
+      <div class="flex flex-col gap-3 border-b border-slate-200 p-4 dark:border-slate-800 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h2 class="font-semibold">История продаж</h2>
-          <p class="text-xs text-slate-500">Все зарегистрированные чеки и продажи</p>
+          <div class="flex items-center gap-2">
+            <h2 class="font-semibold text-base sm:text-lg text-slate-900 dark:text-white">История продаж и заказов</h2>
+            <span class="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              {{ sales.meta?.total ?? sales.sales.length }} чеков
+            </span>
+          </div>
+          <p class="text-xs text-slate-500">
+            Удобный просмотр чеков, товаров, размеров и типов заказов (в наличии / на заказ)
+          </p>
         </div>
-        <select v-model="historyStatus" class="select sm:max-w-48" @change="fetchHistory(1)">
-          <option value="approved">Оформленные</option>
-          <option value="">Все статусы</option>
-          <option value="rejected">Отменённые</option>
-        </select>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            class="btn-muted h-8 px-2.5 text-xs"
+            title="Скачать Excel отчет с полными названиями товаров"
+            @click="downloadExcel"
+          >
+            <Download class="h-3.5 w-3.5" />
+            Excel отчет
+          </button>
+          <button
+            type="button"
+            class="btn-muted h-8 w-8 px-0"
+            title="Обновить историю"
+            @click="fetchHistory(1)"
+          >
+            <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': sales.loading }" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Фильтры: Поиск + Тип заказа (Все / В наличии / На заказ) + Статус -->
+      <div class="flex flex-col gap-3 border-b border-slate-200 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-900/40 md:flex-row md:items-center md:justify-between">
+        <!-- Поиск -->
+        <div class="relative flex-1 max-w-md">
+          <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+          <input
+            v-model="historySearch"
+            class="input h-9 pl-9 pr-8 text-xs"
+            placeholder="Поиск по № чека, названию товара, размеру или кассиру..."
+            @input="debouncedHistory"
+            @keyup.enter="fetchHistory(1)"
+          />
+          <button
+            v-if="historySearch"
+            type="button"
+            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            @click="historySearch = ''; fetchHistory(1)"
+          >
+            <X class="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- Фильтр по типу заказа: Все / В наличии / На заказ -->
+          <div class="flex rounded-lg bg-slate-200/70 p-0.5 text-xs dark:bg-slate-800">
+            <button
+              type="button"
+              class="rounded-md px-3 py-1.5 font-medium transition"
+              :class="historyOrderType === '' ? 'bg-white shadow text-slate-900 dark:bg-slate-700 dark:text-white' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'"
+              @click="setHistoryOrderType('')"
+            >
+              Все
+            </button>
+            <button
+              type="button"
+              class="rounded-md px-3 py-1.5 font-medium transition"
+              :class="historyOrderType === 'in_stock' ? 'bg-white shadow text-emerald-700 dark:bg-slate-700 dark:text-emerald-300' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'"
+              @click="setHistoryOrderType('in_stock')"
+            >
+              В наличии
+            </button>
+            <button
+              type="button"
+              class="flex items-center gap-1 rounded-md px-3 py-1.5 font-medium transition"
+              :class="historyOrderType === 'on_order' ? 'bg-amber-500 text-white shadow' : 'text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-white'"
+              @click="setHistoryOrderType('on_order')"
+            >
+              <span>📦</span>
+              <span>На заказ</span>
+            </button>
+          </div>
+
+          <!-- Фильтр по статусу -->
+          <select
+            v-model="historyStatus"
+            class="select h-9 text-xs sm:w-40"
+            @change="fetchHistory(1)"
+          >
+            <option value="approved">Оформленные</option>
+            <option value="">Все статусы</option>
+            <option value="rejected">Отменённые</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Список чеков -->
+      <div v-if="sales.loading" class="p-6">
+        <SkeletonBlock custom-class="h-44" />
       </div>
 
       <EmptyState
-        v-if="!sales.loading && !sales.sales.length"
-        class="m-4"
-        title="Продаж пока нет"
-        text="Оформите первую продажу сверху."
+        v-else-if="!sales.sales.length"
+        class="m-6"
+        title="Продажи не найдены"
+        :text="historySearch || historyOrderType ? 'Попробуйте сбросить фильтры поиска.' : 'Оформите первую продажу в форме сверху.'"
       />
 
       <div v-else class="divide-y divide-slate-200 dark:divide-slate-800">
         <div
           v-for="sale in sales.sales"
           :key="sale.id"
-          class="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between"
+          class="p-4 transition hover:bg-slate-50/50 dark:hover:bg-slate-900/30"
         >
-          <div>
-            <div class="flex items-center gap-2">
-              <span class="font-semibold text-slate-900 dark:text-white">{{ saleTitle(sale) }}</span>
+          <!-- Верхняя строка карточки продажи: Номер, дата, бейдж типа, статус и сумма -->
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-bold text-slate-900 dark:text-white text-base">
+                {{ formatSaleNumber(sale) }}
+              </span>
+
+              <!-- Бейдж типа заказа: На заказ или В наличии -->
               <span
-                class="badge"
+                class="rounded-full px-2.5 py-0.5 text-xs font-semibold inline-flex items-center gap-1 border"
+                :class="sale.is_on_order
+                  ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                  : 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'"
+              >
+                <Package v-if="sale.is_on_order" class="h-3 w-3" />
+                <Check v-else class="h-3 w-3" />
+                {{ sale.order_type_label || (sale.is_on_order ? 'На заказ' : 'В наличии') }}
+              </span>
+
+              <!-- Статус -->
+              <span
+                class="badge text-[11px]"
                 :class="sale.status === 'approved' ? 'badge-success' : 'badge-danger'"
               >
                 {{ sale.status === 'approved' ? 'Оформлен' : 'Отменен' }}
               </span>
+
+              <span class="text-xs text-slate-400">·</span>
+              <span class="text-xs text-slate-500">{{ date(sale.sold_at || sale.approved_at) }}</span>
+              <span class="text-xs text-slate-400">·</span>
+              <span class="text-xs text-slate-600 dark:text-slate-400 font-medium">Кассир: {{ sale.cashier?.name || '—' }}</span>
             </div>
-            <p class="mt-1 text-xs text-slate-500">
-              {{ sale.cashier?.name || 'Кассир' }} · {{ date(sale.sold_at || sale.approved_at) }}
-              <span v-if="sale.cashier_note" class="ml-1 text-slate-600 dark:text-slate-400">· «{{ sale.cashier_note }}»</span>
-            </p>
-            <div class="mt-3 space-y-1">
-              <div
-                v-for="item in sale.items"
-                :key="item.id"
-                class="text-xs text-slate-600 dark:text-slate-300"
-              >
-                <span class="font-medium text-slate-800 dark:text-slate-200">{{ item.display_name || item.product_name }}</span>
-                <span v-if="item.product_type" class="ml-1.5 rounded bg-slate-100 px-1 py-0.2 text-[10px] text-slate-500 dark:bg-slate-800">{{ item.product_type }}</span>
-                <span class="ml-1.5 tabular-nums text-slate-500">× {{ item.quantity }} шт. = {{ money(item.line_total) }}</span>
+
+            <!-- Итоговая сумма чека -->
+            <div class="flex items-center justify-between sm:justify-end gap-3">
+              <div class="text-right">
+                <div class="text-lg font-black tabular-nums text-emerald-600 dark:text-emerald-400">
+                  {{ money(sale.subtotal) }}
+                </div>
+                <div class="text-[10px] text-slate-400">
+                  {{ (sale.items || []).reduce((acc, i) => acc + (Number(i.quantity) || 1), 0) }} шт.
+                </div>
               </div>
+
+              <button
+                v-if="auth.isAdmin"
+                type="button"
+                class="btn-danger h-7 px-2 text-xs"
+                title="Удалить продажу"
+                @click="confirmDeleteSale(sale)"
+              >
+                <Trash2 class="h-3.5 w-3.5" />
+              </button>
             </div>
           </div>
 
-          <div class="flex flex-col gap-2 sm:items-end">
-            <div class="text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-              {{ money(sale.subtotal) }}
+          <!-- Комментарий / примечание кассира (если есть) -->
+          <div
+            v-if="sale.cashier_note"
+            class="mt-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300"
+          >
+            <span class="font-medium text-slate-500">Примечание:</span> {{ sale.cashier_note }}
+          </div>
+
+          <!-- Детализация товаров в чеке -->
+          <div class="mt-3 rounded-lg border border-slate-200/80 bg-white dark:border-slate-800/80 dark:bg-slate-950 p-2.5">
+            <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
+              Товары в этом заказе:
             </div>
-            <button
-              v-if="auth.isAdmin"
-              type="button"
-              class="btn-danger h-8 px-2.5 text-xs"
-              @click="confirmDeleteSale(sale)"
-            >
-              Удалить
-            </button>
+            <div class="space-y-1.5">
+              <div
+                v-for="item in sale.items"
+                :key="item.id"
+                class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs py-1 border-b border-slate-100 last:border-b-0 dark:border-slate-900"
+              >
+                <div class="flex flex-wrap items-center gap-1.5 min-w-0">
+                  <!-- Название товара -->
+                  <span class="font-bold text-slate-900 dark:text-white">
+                    {{ item.product_name || item.product?.name || 'Товар' }}
+                  </span>
+
+                  <!-- Вид товара -->
+                  <span
+                    v-if="item.product_type || item.product?.type"
+                    class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  >
+                    {{ item.product_type || item.product?.type }}
+                  </span>
+
+                  <!-- Размер -->
+                  <span
+                    v-if="item.variant_size"
+                    class="rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                  >
+                    {{ item.variant_size }}
+                  </span>
+                </div>
+
+                <div class="flex items-center gap-3 text-right">
+                  <span class="text-slate-500">
+                    {{ money(item.sale_price) }} × <strong class="text-slate-800 dark:text-slate-200">{{ item.quantity }} шт.</strong>
+                  </span>
+                  <span class="font-bold tabular-nums text-slate-900 dark:text-white min-w-20 text-right">
+                    = {{ money(item.line_total) }}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
+
       <PaginationBar :meta="sales.meta" @page="fetchHistory" />
     </section>
   </div>
@@ -596,8 +828,19 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { Check, LoaderCircle, Package, RefreshCw, ShoppingCart, Sparkles, X } from 'lucide-vue-next'
-import { apiError } from '../api/client'
+import {
+  Check,
+  Download,
+  LoaderCircle,
+  Package,
+  RefreshCw,
+  Search,
+  ShoppingCart,
+  Sparkles,
+  Trash2,
+  X,
+} from 'lucide-vue-next'
+import api, { apiError } from '../api/client'
 import { resolveApiOrigin } from '../config/api'
 import { useAuthStore } from '../stores/auth'
 import { useCatalogStore } from '../stores/catalog'
@@ -614,8 +857,11 @@ const toast = useToastStore()
 
 const activeMode = ref('catalog') // 'catalog' | 'quick'
 const productSearch = ref('')
+const historySearch = ref('')
 const historyStatus = ref('approved')
+const historyOrderType = ref('') // '' (all) | 'in_stock' | 'on_order'
 const cart = ref([])
+const cartIsOnOrder = ref(false)
 const cashierNote = ref('')
 const saving = ref(false)
 const quickSaving = ref(false)
@@ -626,6 +872,7 @@ const selectedProduct = ref(null)
 const selectedVariant = ref(null)
 const productDetail = ref(null)
 let debounce
+let historyDebounce
 let timer
 
 const popularTypes = [
@@ -658,6 +905,7 @@ const quickForm = ref({
   color: '',
   sale_price: '',
   purchase_price: 0,
+  is_on_order: false,
   quantity: 1,
   remaining_stock: 0,
   cashier_note: '',
@@ -670,7 +918,6 @@ const stepHint = computed(() => {
   return 'Шаг 2: выберите размер для добавления в чек'
 })
 
-// Показываем ВСЕ активные товары (склад может быть 0, если не учтен)
 const availableProducts = computed(() => catalog.products || [])
 
 const allVariantsOfSelected = computed(() => {
@@ -797,10 +1044,12 @@ async function createSale() {
         quantity: row.quantity,
         source: 'display',
       })),
+      is_on_order: Boolean(cartIsOnOrder.value),
       cashier_note: cashierNote.value ? cashierNote.value.trim() : null,
     })
     toast.push('Продажа успешно оформлена!')
     cart.value = []
+    cartIsOnOrder.value = false
     cashierNote.value = ''
     await refreshAll()
   } catch (error) {
@@ -826,13 +1075,14 @@ async function submitQuickSale() {
       size: quickForm.value.size ? quickForm.value.size.trim() : 'M',
       color: quickForm.value.color ? quickForm.value.color.trim() : null,
       sale_price: Number(quickForm.value.sale_price),
-      purchase_price: Number(quickForm.value.purchase_price || 0),
+      purchase_price: 0, // Себестоимость убрана из формы
+      is_on_order: Boolean(quickForm.value.is_on_order),
       quantity: Math.max(1, Number(quickForm.value.quantity || 1)),
       remaining_stock: Math.max(0, Number(quickForm.value.remaining_stock || 0)),
       cashier_note: quickForm.value.cashier_note ? quickForm.value.cashier_note.trim() : null,
     }
 
-    const { data } = await sales.createQuick(payload)
+    await sales.createQuick(payload)
     toast.push(`Товар «${payload.name}» создан и продажа успешно оформлена!`)
 
     // Сброс формы для следующей продажи
@@ -847,6 +1097,7 @@ async function submitQuickSale() {
       color: '',
       sale_price: '',
       purchase_price: 0,
+      is_on_order: false,
       quantity: 1,
       remaining_stock: 0,
       cashier_note: '',
@@ -869,8 +1120,28 @@ function debouncedProducts() {
   debounce = window.setTimeout(fetchProducts, 300)
 }
 
+function debouncedHistory() {
+  window.clearTimeout(historyDebounce)
+  historyDebounce = window.setTimeout(() => fetchHistory(1), 300)
+}
+
+function setHistoryOrderType(val) {
+  historyOrderType.value = val
+  fetchHistory(1)
+}
+
 async function fetchHistory(page = 1) {
-  await sales.fetch({ page, status: historyStatus.value || undefined })
+  const params = {
+    page,
+    status: historyStatus.value || undefined,
+    search: historySearch.value ? historySearch.value.trim() : undefined,
+  }
+  if (historyOrderType.value === 'on_order') {
+    params.is_on_order = true
+  } else if (historyOrderType.value === 'in_stock') {
+    params.is_on_order = false
+  }
+  await sales.fetch(params)
 }
 
 async function refreshAll() {
@@ -881,8 +1152,11 @@ async function refreshAll() {
   ])
 }
 
-function saleTitle(sale) {
-  return sale.display_title || sale.number || `Продажа №${sale.id}`
+function formatSaleNumber(sale) {
+  if (sale.number && !sale.number.startsWith('draft') && !sale.number.startsWith('S-')) {
+    return sale.number
+  }
+  return `Чек №${sale.id}`
 }
 
 function money(value) {
@@ -893,8 +1167,29 @@ function date(value) {
   return value ? new Date(value).toLocaleString('ru-RU') : '—'
 }
 
+async function downloadExcel() {
+  try {
+    const params = new URLSearchParams()
+    if (historyStatus.value) params.set('status', historyStatus.value)
+    if (historyOrderType.value === 'on_order') params.set('is_on_order', '1')
+    if (historyOrderType.value === 'in_stock') params.set('is_on_order', '0')
+
+    const res = await api.get(`/reports/sales.xlsx?${params.toString()}`, { responseType: 'blob' })
+    const blob = new Blob([res.data])
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `sales-report-${new Date().toISOString().slice(0, 10)}.xlsx`
+    link.click()
+    URL.revokeObjectURL(link.href)
+    toast.push('Excel отчет успешно сформирован и скачан!')
+  } catch (error) {
+    toast.push(apiError(error), 'error')
+  }
+}
+
 async function confirmDeleteSale(sale) {
-  if (!confirm(`Удалить ${saleTitle(sale)}?`)) return
+  const label = formatSaleNumber(sale)
+  if (!confirm(`Вы действительно хотите удалить ${label}?`)) return
   try {
     const { data } = await sales.deleteSale(sale.id)
     toast.push(data?.message || 'Удалено')
