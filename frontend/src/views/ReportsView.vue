@@ -10,7 +10,7 @@
             Отчёты
           </h1>
           <span class="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300">
-            Аналитика продаж
+            Аналитика продаж (в тенге ₸)
           </span>
         </div>
         <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -25,7 +25,7 @@
           type="button"
           class="btn-primary flex items-center gap-2 px-3.5 py-2 text-xs font-bold shadow-sm"
           :disabled="exportingExcel"
-          title="Скачать полный отчет по продажам в формате Excel"
+          title="Скачать полный отчет по продажам в формате Excel (с автофильтрами и суммами в тенге ₸)"
           @click="downloadExcelReport"
         >
           <FileSpreadsheet class="h-4 w-4" :class="{ 'animate-pulse': exportingExcel }" />
@@ -88,11 +88,11 @@
     </header>
 
     <!-- ======================================================== -->
-    <!-- ЗОНА 2: ПЕРЕРАБОТАННАЯ ПАНЕЛЬ ФИЛЬТРОВ                   -->
+    <!-- ЗОНА 2: ПЕРЕРАБОТАННАЯ ПАНЕЛЬ ФИЛЬТРОВ (КАК В EXCEL)      -->
     <!-- ======================================================== -->
-    <section class="panel p-4 space-y-3">
+    <section class="panel p-4 space-y-3.5">
+      <!-- 1-я строка: Период, Наличие, Категория, Размер и Поиск -->
       <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <!-- Левая часть: Период и Тип операции -->
         <div class="flex flex-wrap items-center gap-2">
           <!-- Пресеты периодов -->
           <div class="flex rounded-lg bg-slate-100 p-0.5 text-xs font-medium dark:bg-slate-800">
@@ -149,16 +149,31 @@
               </option>
             </select>
           </div>
+
+          <!-- Фильтр по размеру (как выпадающий фильтр в столбце Excel) -->
+          <div class="relative">
+            <select
+              v-model="selectedSize"
+              class="input h-8 py-1 pl-2.5 pr-8 text-xs font-medium"
+              :class="{ 'border-indigo-500 font-bold text-indigo-700 dark:text-indigo-300': selectedSize }"
+              @change="fetchAnalytics"
+            >
+              <option value="">Все размеры</option>
+              <option v-for="sz in availableSizes" :key="sz" :value="sz">
+                Размер: {{ sz }}
+              </option>
+            </select>
+          </div>
         </div>
 
-        <!-- Правая часть: Поиск -->
-        <div class="relative w-full sm:w-64">
+        <!-- Правая часть: Строка поиска -->
+        <div class="relative w-full sm:w-72">
           <Search class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
           <input
             v-model="searchQuery"
             type="text"
             class="input h-8 pl-8 pr-7 text-xs"
-            placeholder="Поиск по виду, товару, размеру..."
+            placeholder="Поиск по модели, цвету, размеру..."
             @input="onSearchInput"
           />
           <button
@@ -172,10 +187,35 @@
         </div>
       </div>
 
+      <!-- 2-я строка: Быстрые фильтры по видам одежды (Чипы / Теги, как в розничных таблицах) -->
+      <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
+        <span class="text-slate-400 font-semibold shrink-0 text-[11px] uppercase tracking-wider mr-1">
+          Вид товара:
+        </span>
+        <button
+          type="button"
+          class="shrink-0 rounded-full px-3 py-1 font-semibold transition"
+          :class="!selectedType ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'"
+          @click="setType('')"
+        >
+          Все виды
+        </button>
+        <button
+          v-for="t in availableTypes"
+          :key="t"
+          type="button"
+          class="shrink-0 rounded-full px-3 py-1 font-semibold transition"
+          :class="selectedType === t ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'"
+          @click="setType(t)"
+        >
+          {{ t }}
+        </button>
+      </div>
+
       <!-- Поля выбора произвольного периода (если выбран 'custom') -->
       <div
         v-if="activePeriod === 'custom'"
-        class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 text-xs dark:border-slate-800"
+        class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2.5 text-xs dark:border-slate-800"
       >
         <span class="text-slate-500 font-medium">Произвольный период:</span>
         <div class="flex items-center gap-1.5">
@@ -195,34 +235,57 @@
         </div>
       </div>
 
-      <!-- Информационная плашка активных фильтров и кнопка сброса -->
+      <!-- Информационная плашка активных фильтров (Active Filters Tags с кнопкой снятия ✕) -->
       <div
         v-if="isFiltered"
-        class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5 text-[11px] text-slate-500 dark:border-slate-800 dark:text-slate-400"
+        class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5 text-xs dark:border-slate-800"
       >
         <div class="flex flex-wrap items-center gap-1.5">
-          <span>Активные фильтры:</span>
-          <span class="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-            {{ activePeriodLabel }}
+          <span class="text-slate-400 text-[11px]">Активные фильтры:</span>
+          <!-- Период -->
+          <span class="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+            📅 {{ activePeriodLabel }}
           </span>
+          <!-- Вид -->
+          <span
+            v-if="selectedType"
+            class="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+          >
+            👕 Вид: {{ selectedType }}
+            <button type="button" class="hover:text-emerald-950 ml-0.5" title="Снять фильтр вида" @click="setType('')">✕</button>
+          </span>
+          <!-- Размер -->
+          <span
+            v-if="selectedSize"
+            class="inline-flex items-center gap-1 rounded-md bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300"
+          >
+            📏 Размер: {{ selectedSize }}
+            <button type="button" class="hover:text-indigo-950 ml-0.5" title="Снять фильтр размера" @click="setSize('')">✕</button>
+          </span>
+          <!-- Тип заказа -->
           <span
             v-if="orderTypeFilter"
-            class="rounded px-1.5 py-0.5 font-medium"
-            :class="orderTypeFilter === 'in_stock' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'"
+            class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-semibold"
+            :class="orderTypeFilter === 'in_stock' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'"
           >
-            {{ orderTypeFilter === 'in_stock' ? 'Только в наличии' : 'Только под заказ' }}
+            {{ orderTypeFilter === 'in_stock' ? '✓ В наличии' : '📦 Под заказ' }}
+            <button type="button" class="ml-0.5" title="Снять фильтр типа заказа" @click="setOrderType('')">✕</button>
           </span>
+          <!-- Категория -->
           <span
             v-if="categoryFilter"
-            class="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            class="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300"
           >
-            Категория: {{ selectedCategoryName }}
+            📁 {{ selectedCategoryName }}
+            <button type="button" class="hover:text-slate-900 ml-0.5" title="Снять фильтр категории" @click="setCategory(null)">✕</button>
           </span>
+          <!-- Текст поиска -->
           <span
             v-if="searchQuery"
-            class="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            class="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300"
           >
-            «{{ searchQuery }}»
+            🔍 «{{ searchQuery }}»
+            <button type="button" class="hover:text-slate-900 ml-0.5" title="Очистить поиск" @click="clearSearch">✕</button>
           </span>
         </div>
 
@@ -231,7 +294,7 @@
           class="text-xs font-semibold text-rose-600 hover:underline dark:text-rose-400"
           @click="resetFilters"
         >
-          Сбросить фильтры
+          Сбросить все фильтры
         </button>
       </div>
     </section>
@@ -279,14 +342,14 @@
         </div>
       </div>
 
-      <!-- КАРТОЧКА 2: ВЫРУЧКА -->
+      <!-- КАРТОЧКА 2: ВЫРУЧКА (СТРОГО В ТЕНГЕ ₸) -->
       <div class="panel border-l-4 border-l-sky-500 p-4">
         <div class="flex items-center justify-between">
           <span class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
             Выручка
           </span>
           <span class="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-800 dark:bg-sky-950 dark:text-sky-300">
-            За период
+            В тенге ₸
           </span>
         </div>
 
@@ -389,7 +452,7 @@
               Динамика продаж по дням
             </h3>
             <p class="text-[11px] text-slate-400">
-              Выручка и количество проданных товаров в выбранном периоде
+              Выручка (₸) и количество проданных товаров в выбранном периоде
             </p>
           </div>
           <div class="flex items-center gap-3 text-xs">
@@ -410,7 +473,6 @@
         </div>
 
         <div v-else class="mt-4">
-          <!-- График столбцов -->
           <div class="flex h-44 items-end gap-1 overflow-x-auto pb-1 pt-6">
             <div
               v-for="d in salesDynamics"
@@ -458,9 +520,12 @@
       <div class="panel p-4 flex flex-col justify-between">
         <!-- Блок 1: Популярные размеры -->
         <div>
-          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
-            Востребованные размеры
-          </h3>
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
+              Востребованные размеры
+            </h3>
+            <span class="text-[10px] text-slate-400">Клик для фильтра</span>
+          </div>
           <p class="text-[11px] text-slate-400 mb-2.5">
             Размеры с наибольшим объемом продаж
           </p>
@@ -470,16 +535,19 @@
           </div>
 
           <div v-else class="flex flex-wrap gap-1.5">
-            <div
+            <button
               v-for="sz in topSizes"
               :key="sz.size"
-              class="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs dark:border-slate-800 dark:bg-slate-900"
+              type="button"
+              class="flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition hover:border-emerald-500"
+              :class="selectedSize === sz.size ? 'border-emerald-500 bg-emerald-50 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200' : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300'"
+              @click="setSize(selectedSize === sz.size ? '' : sz.size)"
             >
-              <span class="font-black text-slate-900 dark:text-white">{{ sz.size }}</span>
+              <span class="font-black">{{ sz.size }}</span>
               <span class="rounded bg-emerald-100 px-1.5 py-0.2 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
                 {{ sz.sold_quantity }} шт.
               </span>
-            </div>
+            </button>
           </div>
         </div>
 
@@ -555,24 +623,48 @@
           </button>
         </div>
 
-        <!-- Кнопка «Свернуть / Развернуть все» для активной вкладки -->
-        <div v-if="activeTab === 'types' && filteredTypes.length" class="flex items-center gap-2">
-          <button
-            type="button"
-            class="text-xs font-semibold text-emerald-600 hover:underline dark:text-emerald-400"
-            @click="toggleAllTypes"
-          >
-            {{ allTypesExpanded ? 'Свернуть все размеры' : 'Раскрыть все размеры' }}
-          </button>
-        </div>
-        <div v-else-if="activeTab === 'products' && filteredProducts.length" class="flex items-center gap-2">
-          <button
-            type="button"
-            class="text-xs font-semibold text-emerald-600 hover:underline dark:text-emerald-400"
-            @click="toggleAllProductSizes"
-          >
-            {{ allProductsExpanded ? 'Свернуть все размеры' : 'Раскрыть все размеры' }}
-          </button>
+        <!-- Управление отображением: сортировка и раскрытие -->
+        <div class="flex flex-wrap items-center gap-3 text-xs">
+          <!-- Выпадающий список сортировки (как в Excel) -->
+          <div class="flex items-center gap-1.5 text-slate-500">
+            <span>Сортировка:</span>
+            <select
+              v-model="sortField"
+              class="input h-7 py-0.5 pl-2 pr-6 text-xs font-medium"
+            >
+              <option value="sold_quantity">По числу продаж</option>
+              <option value="revenue">По выручке</option>
+              <option value="name">По алфавиту / названию</option>
+            </select>
+            <button
+              type="button"
+              class="btn-muted h-7 px-2 text-xs"
+              :title="sortDirection === 'desc' ? 'По убыванию (кликните для возрастания)' : 'По возрастанию'"
+              @click="sortDirection = sortDirection === 'desc' ? 'asc' : 'desc'"
+            >
+              {{ sortDirection === 'desc' ? '▼ Убыв.' : '▲ Возр.' }}
+            </button>
+          </div>
+
+          <!-- Кнопка «Свернуть / Развернуть все» -->
+          <div v-if="activeTab === 'types' && filteredTypes.length">
+            <button
+              type="button"
+              class="text-xs font-semibold text-emerald-600 hover:underline dark:text-emerald-400"
+              @click="toggleAllTypes"
+            >
+              {{ allTypesExpanded ? 'Свернуть все размеры' : 'Раскрыть все размеры' }}
+            </button>
+          </div>
+          <div v-else-if="activeTab === 'products' && filteredProducts.length">
+            <button
+              type="button"
+              class="text-xs font-semibold text-emerald-600 hover:underline dark:text-emerald-400"
+              @click="toggleAllProductSizes"
+            >
+              {{ allProductsExpanded ? 'Свернуть все размеры' : 'Раскрыть все размеры' }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -589,12 +681,12 @@
           v-if="!filteredTypes.length"
           class="m-6"
           title="Данные не найдены"
-          text="За выбранный период продаж по видам товаров не обнаружено. Измените период или параметры фильтра."
+          text="По выбранным фильтрам и параметрам поиска товаров не найдено. Попробуйте снять фильтр вида или размера."
         />
 
         <div v-else class="divide-y divide-slate-200 dark:divide-slate-800">
           <div
-            v-for="item in filteredTypes"
+            v-for="item in sortedTypes"
             :key="item.type"
             class="p-4 transition hover:bg-slate-50/50 dark:hover:bg-slate-900/30"
           >
@@ -680,7 +772,7 @@
                       <th class="px-3.5 py-2.5 text-right font-black text-slate-900 dark:text-white">Продано всего</th>
                       <th class="px-3.5 py-2.5 text-right text-emerald-700 dark:text-emerald-300">✓ Из наличия</th>
                       <th class="px-3.5 py-2.5 text-right text-amber-700 dark:text-amber-300">📦 Под заказ</th>
-                      <th class="px-3.5 py-2.5 text-right">Выручка</th>
+                      <th class="px-3.5 py-2.5 text-right">Выручка (₸)</th>
                       <th class="px-3.5 py-2.5 text-right">Ср. цена шт.</th>
                       <th class="px-3.5 py-2.5 text-right">Доля в виде</th>
                     </tr>
@@ -690,6 +782,7 @@
                       v-for="sz in item.sizes"
                       :key="sz.size"
                       class="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition"
+                      :class="{ 'bg-indigo-50/50 dark:bg-indigo-950/30': selectedSize && sz.size === selectedSize }"
                     >
                       <!-- Размер -->
                       <td class="px-3.5 py-2.5 font-bold text-slate-900 dark:text-white">
@@ -759,7 +852,7 @@
 
         <div v-else class="divide-y divide-slate-200 dark:divide-slate-800">
           <div
-            v-for="product in filteredProducts"
+            v-for="product in sortedProducts"
             :key="product.product_id || product.name"
             class="p-4 transition hover:bg-slate-50/50 dark:hover:bg-slate-900/30"
           >
@@ -832,7 +925,7 @@
                       <th class="px-3.5 py-2 text-right text-emerald-600 dark:text-emerald-400">✓ В наличии</th>
                       <th class="px-3.5 py-2 text-right text-amber-600 dark:text-amber-400">📦 Под заказ</th>
                       <th class="px-3.5 py-2 text-right">Ср. цена</th>
-                      <th class="px-3.5 py-2 text-right">Выручка</th>
+                      <th class="px-3.5 py-2 text-right">Выручка (₸)</th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-slate-100 dark:divide-slate-900">
@@ -840,6 +933,7 @@
                       v-for="sz in product.sizes"
                       :key="sz.size"
                       class="hover:bg-slate-50/60 dark:hover:bg-slate-900/50"
+                      :class="{ 'bg-indigo-50/50 dark:bg-indigo-950/30': selectedSize && sz.size === selectedSize }"
                     >
                       <td class="px-3.5 py-2 font-bold text-slate-900 dark:text-white">
                         <span class="inline-block rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs dark:border-slate-700 dark:bg-slate-800">
@@ -889,13 +983,13 @@
                 <th class="px-4 py-3 text-right font-bold text-slate-900 dark:text-white">Продано всего</th>
                 <th class="px-4 py-3 text-right text-emerald-600 dark:text-emerald-400">✓ В наличии</th>
                 <th class="px-4 py-3 text-right text-amber-600 dark:text-amber-400">📦 Под заказ</th>
-                <th class="px-4 py-3 text-right">Выручка</th>
+                <th class="px-4 py-3 text-right">Выручка (₸)</th>
                 <th class="px-4 py-3 text-right">Доля в продажах</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-200 dark:divide-slate-800">
               <tr
-                v-for="item in filteredCategories"
+                v-for="item in sortedCategories"
                 :key="item.category_id || item.category_name"
                 class="transition hover:bg-slate-50/80 dark:hover:bg-slate-900/40"
               >
@@ -958,9 +1052,15 @@ const activeTab = ref('types') // 'types' | 'products' | 'categories'
 const activePeriod = ref('month') // 'all' | 'today' | '7days' | 'month' | 'custom'
 const orderTypeFilter = ref('') // '' (все) | 'in_stock' | 'on_order'
 const categoryFilter = ref(null) // ID категории или null
+const selectedType = ref('') // Вид товара ('Поло', 'Брюки'...)
+const selectedSize = ref('') // Размер ('116', '122', '140'...)
 const searchQuery = ref('')
 const customDateFrom = ref('')
 const customDateTo = ref('')
+
+// Сортировка таблицы (как в Excel)
+const sortField = ref('sold_quantity') // 'sold_quantity' | 'revenue' | 'name'
+const sortDirection = ref('desc') // 'desc' | 'asc'
 
 const categories = ref([])
 
@@ -975,6 +1075,8 @@ const analyticsData = ref({
   sales_dynamics: [],
   top_products: [],
   top_sizes: [],
+  available_types: [],
+  available_sizes: [],
   by_type: [],
   by_category: [],
   by_product: [],
@@ -996,11 +1098,25 @@ const byType = computed(() => analyticsData.value?.by_type || [])
 const byCategory = computed(() => analyticsData.value?.by_category || [])
 const byProduct = computed(() => analyticsData.value?.by_product || [])
 
+const availableTypes = computed(() => {
+  const serverTypes = analyticsData.value?.available_types || []
+  if (serverTypes.length) return serverTypes
+  const defaults = ['Поло', 'Брюки', 'Юбка', 'Рубашка', 'Жилет', 'Пиджак', 'Сарафан', 'Блузка', 'Шорты', 'Платье', 'Галстук']
+  const fromData = byType.value.map((t) => t.type)
+  return Array.from(new Set([...defaults, ...fromData])).filter(Boolean)
+})
+
+const availableSizes = computed(() => {
+  return analyticsData.value?.available_sizes || []
+})
+
 const isFiltered = computed(() => {
   return (
     activePeriod.value !== 'month' ||
     orderTypeFilter.value !== '' ||
     categoryFilter.value !== null ||
+    selectedType.value !== '' ||
+    selectedSize.value !== '' ||
     searchQuery.value.trim() !== ''
   )
 })
@@ -1019,14 +1135,93 @@ const selectedCategoryName = computed(() => {
   return cat ? cat.name : 'Категория'
 })
 
-// Фильтрация на стороне клиента по поисковой строке
+// Фильтрация на стороне клиента
 const filteredTypes = computed(() => {
+  let list = byType.value
+
+  if (selectedType.value) {
+    list = list.filter((item) => (item.type || '').toLowerCase() === selectedType.value.toLowerCase())
+  }
+
+  if (selectedSize.value) {
+    list = list.filter((item) =>
+      (item.sizes || []).some((sz) => (sz.size || '').toLowerCase() === selectedSize.value.toLowerCase())
+    )
+  }
+
   const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return byType.value
-  return byType.value.filter((item) => {
+  if (!q) return list
+
+  return list.filter((item) => {
     const matchType = (item.type || '').toLowerCase().includes(q)
     const matchSize = (item.sizes || []).some((sz) => (sz.size || '').toLowerCase().includes(q))
     return matchType || matchSize
+  })
+})
+
+const sortedTypes = computed(() => {
+  const list = [...filteredTypes.value]
+  const field = sortField.value
+  const dir = sortDirection.value === 'asc' ? 1 : -1
+
+  return list.sort((a, b) => {
+    if (field === 'sold_quantity') {
+      return (Number(a.sold_quantity || 0) - Number(b.sold_quantity || 0)) * dir
+    }
+    if (field === 'revenue') {
+      return (Number(a.revenue || 0) - Number(b.revenue || 0)) * dir
+    }
+    if (field === 'name') {
+      return (a.type || '').localeCompare(b.type || '') * dir
+    }
+    return 0
+  })
+})
+
+const filteredProducts = computed(() => {
+  let list = byProduct.value
+
+  if (selectedType.value) {
+    list = list.filter((prod) =>
+      (prod.type || '').toLowerCase().includes(selectedType.value.toLowerCase()) ||
+      (prod.name || '').toLowerCase().includes(selectedType.value.toLowerCase())
+    )
+  }
+
+  if (selectedSize.value) {
+    list = list.filter((prod) =>
+      (prod.sizes || []).some((sz) => (sz.size || '').toLowerCase() === selectedSize.value.toLowerCase())
+    )
+  }
+
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return list
+
+  return list.filter((prod) =>
+    (prod.name || '').toLowerCase().includes(q) ||
+    (prod.type || '').toLowerCase().includes(q) ||
+    (prod.category_name || '').toLowerCase().includes(q) ||
+    (prod.color || '').toLowerCase().includes(q) ||
+    (prod.sizes || []).some((sz) => (sz.size || '').toLowerCase().includes(q)),
+  )
+})
+
+const sortedProducts = computed(() => {
+  const list = [...filteredProducts.value]
+  const field = sortField.value
+  const dir = sortDirection.value === 'asc' ? 1 : -1
+
+  return list.sort((a, b) => {
+    if (field === 'sold_quantity') {
+      return (Number(a.sold_quantity || 0) - Number(b.sold_quantity || 0)) * dir
+    }
+    if (field === 'revenue') {
+      return (Number(a.revenue || 0) - Number(b.revenue || 0)) * dir
+    }
+    if (field === 'name') {
+      return (a.name || '').localeCompare(b.name || '') * dir
+    }
+    return 0
   })
 })
 
@@ -1036,16 +1231,23 @@ const filteredCategories = computed(() => {
   return byCategory.value.filter((item) => (item.category_name || '').toLowerCase().includes(q))
 })
 
-const filteredProducts = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return byProduct.value
-  return byProduct.value.filter((prod) =>
-    (prod.name || '').toLowerCase().includes(q) ||
-    (prod.type || '').toLowerCase().includes(q) ||
-    (prod.category_name || '').toLowerCase().includes(q) ||
-    (prod.color || '').toLowerCase().includes(q) ||
-    (prod.sizes || []).some((sz) => (sz.size || '').toLowerCase().includes(q)),
-  )
+const sortedCategories = computed(() => {
+  const list = [...filteredCategories.value]
+  const field = sortField.value
+  const dir = sortDirection.value === 'asc' ? 1 : -1
+
+  return list.sort((a, b) => {
+    if (field === 'sold_quantity') {
+      return (Number(a.sold_quantity || 0) - Number(b.sold_quantity || 0)) * dir
+    }
+    if (field === 'revenue') {
+      return (Number(a.revenue || 0) - Number(b.revenue || 0)) * dir
+    }
+    if (field === 'name') {
+      return (a.category_name || '').localeCompare(b.category_name || '') * dir
+    }
+    return 0
+  })
 })
 
 function getBarHeight(revenue) {
@@ -1084,6 +1286,21 @@ function setOrderType(type) {
   fetchAnalytics()
 }
 
+function setType(type) {
+  selectedType.value = type
+  fetchAnalytics()
+}
+
+function setSize(size) {
+  selectedSize.value = size
+  fetchAnalytics()
+}
+
+function setCategory(id) {
+  categoryFilter.value = id
+  fetchAnalytics()
+}
+
 let searchDebounceTimer = null
 function onSearchInput() {
   clearTimeout(searchDebounceTimer)
@@ -1101,6 +1318,8 @@ function resetFilters() {
   activePeriod.value = 'month'
   orderTypeFilter.value = ''
   categoryFilter.value = null
+  selectedType.value = ''
+  selectedSize.value = ''
   searchQuery.value = ''
   const today = new Date()
   const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
@@ -1134,6 +1353,12 @@ async function fetchAnalytics() {
     if (categoryFilter.value) {
       params.category_id = categoryFilter.value
     }
+    if (selectedType.value) {
+      params.type = selectedType.value
+    }
+    if (selectedSize.value) {
+      params.size = selectedSize.value
+    }
     if (searchQuery.value.trim()) {
       params.search = searchQuery.value.trim()
     }
@@ -1141,7 +1366,7 @@ async function fetchAnalytics() {
     const { data } = await api.get('/reports/analytics', { params })
     analyticsData.value = data
 
-    // По умолчанию списки свернуты (согласно требованиям пользователя)
+    // По умолчанию списки свернуты (согласно требованиям)
     allTypesExpanded.value = false
     expandedTypeNames.value = new Set()
   } catch (error) {
@@ -1218,6 +1443,9 @@ async function downloadExcelReport() {
     }
     if (orderTypeFilter.value === 'on_order') params.set('is_on_order', '1')
     if (orderTypeFilter.value === 'in_stock') params.set('is_on_order', '0')
+    if (categoryFilter.value) params.set('category_id', String(categoryFilter.value))
+    if (selectedType.value) params.set('type', selectedType.value)
+    if (selectedSize.value) params.set('size', selectedSize.value)
 
     const url = `/reports/sales.xlsx?${params.toString()}`
     const response = await api.get(url, { responseType: 'blob' })

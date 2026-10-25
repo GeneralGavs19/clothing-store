@@ -50,20 +50,43 @@ class ReportController extends Controller
             ->orderByDesc('approved_at')
             ->orderByDesc('id');
 
+        $typeFilter = $request->filled('type') ? trim($request->string('type')->toString()) : null;
+        $sizeFilter = $request->filled('size') ? trim($request->string('size')->toString()) : null;
+
         $sales = $salesQuery->get();
 
         // Сводные показатели
-        $totalSalesCount = $sales->count();
+        $totalSalesCount = 0;
         $totalSoldQty = 0;
         $totalRevenue = 0.0;
         $inStockQty = 0;
         $onOrderQty = 0;
         $inStockRev = 0.0;
         $onOrderRev = 0.0;
+        $processedSaleIds = [];
 
         foreach ($sales as $sale) {
             $saleIsOnOrder = (bool) $sale->is_on_order;
+            $hasMatchingItems = false;
+
             foreach ($sale->items as $item) {
+                $pName = $item->product_name ?: $item->product?->name ?: 'Товар';
+                $prodType = $this->resolveProductType(
+                    $item->product_type,
+                    $item->product?->type,
+                    $pName,
+                    $item->product?->category?->name
+                );
+                $itemSize = trim((string) ($item->variant_size ?: 'Без размера'));
+
+                if ($typeFilter && mb_stripos($prodType, $typeFilter) === false && mb_stripos($pName, $typeFilter) === false) {
+                    continue;
+                }
+                if ($sizeFilter && mb_strtolower($itemSize) !== mb_strtolower($sizeFilter)) {
+                    continue;
+                }
+
+                $hasMatchingItems = true;
                 $qty = (int) $item->quantity;
                 $tot = (float) $item->line_total;
                 $isItemOnOrder = $item->is_on_order !== null ? (bool) $item->is_on_order : $saleIsOnOrder;
@@ -77,6 +100,11 @@ class ReportController extends Controller
                     $inStockQty += $qty;
                     $inStockRev += $tot;
                 }
+            }
+
+            if ($hasMatchingItems && ! isset($processedSaleIds[$sale->id])) {
+                $totalSalesCount++;
+                $processedSaleIds[$sale->id] = true;
             }
         }
 
@@ -210,6 +238,14 @@ class ReportController extends Controller
                 $catName = $item->product?->category?->name ?: '—';
                 $color = $item->product?->color ?: '—';
                 $size = $item->variant_size ?: '—';
+
+                if ($typeFilter && mb_stripos($prodType, $typeFilter) === false && mb_stripos($prodName, $typeFilter) === false) {
+                    continue;
+                }
+                if ($sizeFilter && mb_strtolower($size) !== mb_strtolower($sizeFilter)) {
+                    continue;
+                }
+
                 $qty = (int) $item->quantity;
                 $price = (float) $item->sale_price;
                 $total = (float) $item->line_total;
@@ -230,6 +266,11 @@ class ReportController extends Controller
                     $sale->cashier_note ?? '—',
                     $statusLabel,
                 ], null, 'A' . $r);
+
+                // Чередование строк (зебра) для удобства чтения
+                if ($r % 2 === 0) {
+                    $sheet->getStyle("A{$r}:N{$r}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F8FAFC');
+                }
 
                 $r++;
             }
@@ -270,9 +311,15 @@ class ReportController extends Controller
         $sheet->getStyle("I8:I{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
         $sheet->getStyle("N8:N{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
+        // Числовой формат тенге: [$₸-43F] исключает подмену на рубли Excel-ем
         $sheet->getStyle("I8:I{$totalRow}")->getNumberFormat()->setFormatCode('#,##0');
-        $sheet->getStyle("J8:J{$dataEndRow}")->getNumberFormat()->setFormatCode('#,##0 "₸"');
-        $sheet->getStyle("K8:K{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 "₸"');
+        $sheet->getStyle("J8:J{$dataEndRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle("K8:K{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+
+        // Автофильтр (выпадающие списки фильтров по каждому столбцу, как в реальных таблицах)
+        $sheet->setAutoFilter("A7:N{$dataEndRow}");
+        // Закрепление верхней панели (заголовки и карточки остаются при прокрутке)
+        $sheet->freezePane('A8');
 
         foreach (range('A', 'N') as $col) {
             $sheet->getColumnDimension($col)->setAutoSize(true);
@@ -386,6 +433,12 @@ class ReportController extends Controller
                 $avgPrice,
                 $share,
             ], null, 'A' . $r2);
+
+            // Чередование строк (зебра)
+            if ($r2 % 2 === 0) {
+                $sheet2->getStyle("A{$r2}:H{$r2}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F8FAFC');
+            }
+
             $r2++;
         }
 
@@ -413,8 +466,12 @@ class ReportController extends Controller
         $sheet2->getStyle("A5:H{$end2}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('E2E8F0');
         $sheet2->getStyle("B5:B{$end2}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
         $sheet2->getStyle("C5:E{$totalRow2}")->getNumberFormat()->setFormatCode('#,##0');
-        $sheet2->getStyle("F5:G{$totalRow2}")->getNumberFormat()->setFormatCode('#,##0 "₸"');
+        $sheet2->getStyle("F5:G{$totalRow2}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
         $sheet2->getStyle("H5:H{$totalRow2}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+
+        // Автофильтр и закрепление областей (как в реальных Excel таблицах)
+        $sheet2->setAutoFilter("A4:H{$end2}");
+        $sheet2->freezePane('A5');
 
         foreach (range('A', 'H') as $col) {
             $sheet2->getColumnDimension($col)->setAutoSize(true);
@@ -479,6 +536,12 @@ class ReportController extends Controller
                 $sale->cashier_note ?? '—',
                 $statusLabel,
             ], null, 'A' . $r3);
+
+            // Чередование строк
+            if ($r3 % 2 === 0) {
+                $sheet3->getStyle("A{$r3}:I{$r3}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F8FAFC');
+            }
+
             $r3++;
         }
 
@@ -502,7 +565,11 @@ class ReportController extends Controller
         $sheet3->getStyle("A4:I{$end3}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('E2E8F0');
         $sheet3->getStyle("A4:C{$end3}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
         $sheet3->getStyle("E4:E{$totalRow3}")->getNumberFormat()->setFormatCode('#,##0');
-        $sheet3->getStyle("F4:F{$totalRow3}")->getNumberFormat()->setFormatCode('#,##0 "₸"');
+        $sheet3->getStyle("F4:F{$totalRow3}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+
+        // Автофильтр и закрепление
+        $sheet3->setAutoFilter("A3:I{$end3}");
+        $sheet3->freezePane('A4');
 
         foreach (range('A', 'I') as $col) {
             $sheet3->getColumnDimension($col)->setAutoSize(true);
@@ -600,6 +667,8 @@ class ReportController extends Controller
 
         $categoryId = $request->filled('category_id') ? (int) $request->input('category_id') : null;
         $searchTerm = $request->filled('search') ? trim($request->string('search')->toString()) : null;
+        $typeFilter = $request->filled('type') ? trim($request->string('type')->toString()) : null;
+        $sizeFilter = $request->filled('size') ? trim($request->string('size')->toString()) : null;
 
         // 1. Построение запроса к позициям продаж (sale_items)
         $salesQuery = DB::table('sale_items')
@@ -633,6 +702,19 @@ class ReportController extends Controller
 
         if ($categoryId) {
             $salesQuery->where('products.category_id', $categoryId);
+        }
+
+        if ($sizeFilter) {
+            $salesQuery->where('sale_items.variant_size', $sizeFilter);
+        }
+
+        if ($typeFilter) {
+            $salesQuery->where(function ($q) use ($typeFilter) {
+                $q->where('sale_items.product_type', 'like', "%{$typeFilter}%")
+                  ->orWhere('products.type', 'like', "%{$typeFilter}%")
+                  ->orWhere('sale_items.product_name', 'like', "%{$typeFilter}%")
+                  ->orWhere('products.name', 'like', "%{$typeFilter}%");
+            });
         }
 
         if ($searchTerm) {
@@ -1122,6 +1204,34 @@ class ReportController extends Controller
             ->values()
             ->all();
 
+        // Справочники всех существующих видов и размеров для быстрых чип-фильтров (как в Excel)
+        $knownApparelTypes = [
+            'Поло', 'Брюки', 'Юбка', 'Рубашка', 'Жилет', 'Пиджак', 'Сарафан', 'Блузка',
+            'Шорты', 'Платье', 'Галстук', 'Фартук', 'Костюм', 'Спортивная форма', 'Кроссовки', 'Обувь'
+        ];
+        $dbTypes = DB::table('sale_items')->whereNotNull('product_type')->where('product_type', '!=', '')->distinct()->pluck('product_type');
+        $prodTypes = DB::table('products')->whereNotNull('type')->where('type', '!=', '')->distinct()->pluck('type');
+        $availableTypes = collect($knownApparelTypes)
+            ->merge($dbTypes)
+            ->merge($prodTypes)
+            ->map(fn ($t) => trim((string) $t))
+            ->filter(fn ($t) => $t !== '' && $t !== '—' && $t !== 'Без вида')
+            ->unique()
+            ->values()
+            ->all();
+
+        $dbSizes = DB::table('sale_items')->whereNotNull('variant_size')->where('variant_size', '!=', '')->distinct()->pluck('variant_size');
+        $varSizes = DB::table('product_variants')->whereNotNull('size')->where('size', '!=', '')->distinct()->pluck('size');
+        $rawSizes = $dbSizes->merge($varSizes)
+            ->map(fn ($s) => trim((string) $s))
+            ->filter(fn ($s) => $s !== '' && $s !== '—' && $s !== '-')
+            ->unique()
+            ->map(fn ($s) => ['size' => $s])
+            ->values()
+            ->all();
+        $sortedSizes = $this->sortSizes($rawSizes);
+        $availableSizes = array_map(fn ($s) => $s['size'], $sortedSizes);
+
         return response()->json([
             'summary' => [
                 'total_sold_items' => $totalSoldUnits,
@@ -1138,6 +1248,8 @@ class ReportController extends Controller
             'sales_dynamics' => $salesDynamics,
             'top_products' => $topProducts,
             'top_sizes' => $topSizes,
+            'available_types' => $availableTypes,
+            'available_sizes' => $availableSizes,
             'by_type' => $byType,
             'by_category' => $byCategory,
             'by_product' => $byProduct,
@@ -1145,6 +1257,8 @@ class ReportController extends Controller
                 'date_from' => $dateFrom?->toDateString(),
                 'date_to' => $dateTo?->toDateString(),
                 'order_type' => $orderType ?: '',
+                'type' => $typeFilter,
+                'size' => $sizeFilter,
                 'category_id' => $categoryId,
                 'search' => $searchTerm,
             ],
