@@ -19,9 +19,16 @@ class SalesService
 {
     public function __construct(private ProductItemService $itemService) {}
 
-    public function createCompleted(User $cashier, array $items, ?string $note = null, bool $isOnOrder = false): Sale
-    {
-        return DB::transaction(function () use ($cashier, $items, $note, $isOnOrder) {
+    public function createCompleted(
+        User $cashier,
+        array $items,
+        ?string $note = null,
+        bool $isOnOrder = false,
+        $customDate = null,
+        ?string $dueDate = null,
+        ?string $fulfillmentStatus = null
+    ): Sale {
+        return DB::transaction(function () use ($cashier, $items, $note, $isOnOrder, $customDate, $dueDate, $fulfillmentStatus) {
             $itemIds = collect($items)->pluck('product_item_id')->filter()->unique()->values();
             $productItems = ProductItem::query()->whereIn('id', $itemIds)->lockForUpdate()->get()->keyBy('id');
 
@@ -35,16 +42,29 @@ class SalesService
 
             $this->assertAvailability($items, $productItems, $variants, $products);
 
-            $soldAt = now();
+            $soldAt = $customDate ? \Illuminate\Support\Carbon::parse($customDate) : now();
+            if ($customDate && ! str_contains((string) $customDate, ':')) {
+                $now = now();
+                if ($soldAt->isToday()) {
+                    $soldAt->setTime($now->hour, $now->minute, $now->second);
+                } else {
+                    $soldAt->setTime(12, 0, 0);
+                }
+            }
+
+            $orderStatus = $isOnOrder ? ($fulfillmentStatus ?: 'new') : null;
 
             $sale = Sale::create([
                 'number' => 'draft-'.Str::uuid()->toString(),
                 'cashier_id' => $cashier->id,
                 'status' => 'approved',
                 'is_on_order' => $isOnOrder,
+                'due_date' => $dueDate ?: null,
+                'fulfillment_status' => $orderStatus,
                 'approved_by' => $cashier->id,
                 'approved_at' => $soldAt,
                 'submitted_at' => $soldAt,
+                'created_at' => $soldAt,
                 'cashier_note' => $note,
             ]);
 
@@ -358,6 +378,84 @@ class SalesService
         });
     }
 
+    public function cancelSale(Sale $sale, User $actor, ?string $reason = null): Sale
+    {
+        return DB::transaction(function () use ($sale, $actor, $reason) {
+            $sale = Sale::query()->with(['items'])->lockForUpdate()->findOrFail($sale->id);
+
+            if ($sale->status === 'rejected') {
+                throw ValidationException::withMessages(['sale' => 'Продажа уже была отменена.']);
+            }
+
+            if ($sale->status === 'approved') {
+                $itemIds = $sale->items->pluck('product_item_id')->filter()->unique()->values();
+                $productItems = ProductItem::query()->whereIn('id', $itemIds)->lockForUpdate()->get()->keyBy('id');
+
+                $variantIds = $sale->items->pluck('product_variant_id')->filter()->unique()->values();
+                $variants = ProductVariant::query()
+                    ->whereIn('id', $variantIds->merge($productItems->pluck('product_variant_id'))->unique())
+                    ->lockForUpdate()
+                    ->get()
+                    ->keyBy('id');
+
+                $products = Product::query()
+                    ->whereIn('id', $variants->pluck('product_id')->unique())
+                    ->lockForUpdate()
+                    ->get()
+                    ->keyBy('id');
+
+                foreach ($sale->items as $oldItem) {
+                    if ($oldItem->product_item_id) {
+                        $pi = $productItems->get((int) $oldItem->product_item_id);
+                        if ($pi) {
+                            $location = ($oldItem->source_location ?? 'display') === 'stock'
+                                ? ProductItem::LOCATION_STOCK
+                                : ProductItem::LOCATION_DISPLAY;
+                            $this->itemService->restoreSold($pi, $location);
+                            $var = $variants->get((int) $pi->product_variant_id);
+                            if ($var) {
+                                $var->refresh();
+                                $prod = $products->get((int) $var->product_id);
+                                if ($prod) {
+                                    $prod->applyAggregatesFromVariants();
+                                    $prod->save();
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
+                    $var = $variants->get((int) $oldItem->product_variant_id);
+                    if ($var) {
+                        $source = $oldItem->source_location ?? 'display';
+                        $this->restoreVariantSale($var, (int) $oldItem->quantity, $source);
+                        $var->save();
+
+                        $prod = $products->get((int) $var->product_id);
+                        if ($prod) {
+                            $prod->applyAggregatesFromVariants();
+                            $prod->save();
+                        }
+                    }
+                }
+
+                $this->reverseDailyStats($sale);
+                StockMovement::query()->where('sale_id', $sale->id)->delete();
+            }
+
+            $note = $reason ? trim(strip_tags($reason)) : 'Отменено пользователем '.$actor->name;
+
+            $sale->update([
+                'status' => 'rejected',
+                'fulfillment_status' => 'cancelled',
+                'rejected_at' => now(),
+                'admin_note' => $sale->admin_note ? ($sale->admin_note . ' | ' . $note) : $note,
+            ]);
+
+            return $sale->fresh(['items.product.category', 'cashier', 'approver']);
+        });
+    }
+
     public function updateSale(Sale $sale, array $data, User $actor): Sale
     {
         return DB::transaction(function () use ($sale, $data, $actor) {
@@ -423,7 +521,22 @@ class SalesService
             // 2. Prepare new sale attributes
             $isOnOrder = array_key_exists('is_on_order', $data) ? (bool) $data['is_on_order'] : (bool) $sale->is_on_order;
             $cashierNote = array_key_exists('cashier_note', $data) ? (isset($data['cashier_note']) ? strip_tags($data['cashier_note']) : null) : $sale->cashier_note;
-            $soldAt = $sale->approved_at ?? $sale->created_at ?? now();
+            
+            $soldAt = ! empty($data['sold_at'])
+                ? \Illuminate\Support\Carbon::parse($data['sold_at'])
+                : ($sale->approved_at ?? $sale->created_at ?? now());
+
+            if (! empty($data['sold_at']) && ! str_contains((string) $data['sold_at'], ':')) {
+                $now = now();
+                if ($soldAt->isToday()) {
+                    $soldAt->setTime($now->hour, $now->minute, $now->second);
+                } else {
+                    $soldAt->setTime(12, 0, 0);
+                }
+            }
+
+            $dueDate = array_key_exists('due_date', $data) ? $data['due_date'] : $sale->due_date;
+            $fulfillmentStatus = array_key_exists('fulfillment_status', $data) ? $data['fulfillment_status'] : $sale->fulfillment_status;
 
             // 3. Delete old items and insert updated items
             $sale->items()->delete();
@@ -517,6 +630,10 @@ class SalesService
                 'subtotal' => $subtotal,
                 'profit' => $profit,
                 'is_on_order' => $isOnOrder,
+                'due_date' => $dueDate,
+                'fulfillment_status' => $fulfillmentStatus,
+                'approved_at' => $soldAt,
+                'submitted_at' => $soldAt,
                 'cashier_note' => $cashierNote,
             ]);
 
@@ -734,13 +851,17 @@ class SalesService
             $quantity = max(1, (int) ($data['quantity'] ?? 1));
             $remainingStock = max(0, (int) ($data['remaining_stock'] ?? 0));
 
-            // Check if product exists
-            $productQuery = Product::query()->where('name', $name);
+            // Check if product exists (case-insensitive & trimmed to prevent duplicates)
+            $productQuery = Product::query()->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower($name)]);
             if ($categoryId) {
                 $productQuery->where('category_id', $categoryId);
             }
             if ($type) {
-                $productQuery->where('type', $type);
+                $productQuery->where(function ($tq) use ($type) {
+                    $tq->whereRaw('LOWER(TRIM(type)) = ?', [mb_strtolower($type)])
+                       ->orWhereNull('type')
+                       ->orWhere('type', '');
+                });
             }
             $product = $productQuery->lockForUpdate()->first();
 
@@ -771,10 +892,10 @@ class SalesService
                 $product->save();
             }
 
-            // Check if variant exists
+            // Check if variant exists (case-insensitive)
             $variant = ProductVariant::query()
                 ->where('product_id', $product->id)
-                ->where('size', $size)
+                ->whereRaw('LOWER(TRIM(size)) = ?', [mb_strtolower($size)])
                 ->lockForUpdate()
                 ->first();
 
@@ -804,23 +925,40 @@ class SalesService
             $product->applyAggregatesFromVariants();
             $product->save();
 
-            // Record sale
-            $soldAt = now();
+            // Record sale with user-specified or current date
+            $soldAt = ! empty($data['sold_at'])
+                ? \Illuminate\Support\Carbon::parse($data['sold_at'])
+                : now();
+
+            if (! empty($data['sold_at']) && ! str_contains((string) $data['sold_at'], ':')) {
+                $now = now();
+                if ($soldAt->isToday()) {
+                    $soldAt->setTime($now->hour, $now->minute, $now->second);
+                } else {
+                    $soldAt->setTime(12, 0, 0);
+                }
+            }
+
             $finalSalePrice = $salePrice > 0 ? $salePrice : (float) $variant->sale_price;
             $finalPurchasePrice = $purchasePrice > 0 ? $purchasePrice : (float) $variant->purchase_price;
             $lineTotal = round($finalSalePrice * $quantity, 2);
             $lineProfit = round(($finalSalePrice - $finalPurchasePrice) * $quantity, 2);
 
             $isOnOrder = ! empty($data['is_on_order']);
+            $dueDate = ! empty($data['due_date']) ? $data['due_date'] : null;
+            $fulfillmentStatus = $isOnOrder ? (! empty($data['fulfillment_status']) ? $data['fulfillment_status'] : 'new') : null;
 
             $sale = Sale::create([
                 'number' => 'draft-'.Str::uuid()->toString(),
                 'cashier_id' => $cashier->id,
                 'status' => 'approved',
                 'is_on_order' => $isOnOrder,
+                'due_date' => $dueDate,
+                'fulfillment_status' => $fulfillmentStatus,
                 'approved_by' => $cashier->id,
                 'approved_at' => $soldAt,
                 'submitted_at' => $soldAt,
+                'created_at' => $soldAt,
                 'subtotal' => $lineTotal,
                 'profit' => $lineProfit,
                 'cashier_note' => isset($data['cashier_note']) ? strip_tags($data['cashier_note']) : null,

@@ -22,15 +22,44 @@ class DashboardController extends Controller
         $chartStartUtc = $range['start_utc'];
         $approved = Sale::query()->where('status', 'approved');
 
+        $todayApproved = (clone $approved)->whereDate('approved_at', today());
+        $todayCount = (int) (clone $todayApproved)->count();
+        $todayRev = (float) (clone $todayApproved)->sum('subtotal');
+        $todayAvgCheck = $todayCount > 0 ? round($todayRev / $todayCount, 2) : 0.0;
+
+        $activeOrders = Sale::query()
+            ->where('is_on_order', true)
+            ->where('status', 'approved')
+            ->where(function ($q) {
+                $q->whereNull('fulfillment_status')
+                    ->orWhereIn('fulfillment_status', ['new', 'in_progress', 'ready']);
+            })
+            ->with(['items', 'cashier'])
+            ->orderByRaw('CASE WHEN due_date IS NULL THEN 1 ELSE 0 END')
+            ->orderBy('due_date', 'asc')
+            ->orderBy('approved_at', 'desc')
+            ->limit(10)
+            ->get();
+
+        $todayRecentSales = Sale::query()
+            ->where('status', 'approved')
+            ->whereDate('approved_at', today())
+            ->with(['items', 'cashier'])
+            ->latest('approved_at')
+            ->limit(8)
+            ->get();
+
         $summary = [
             'total_profit' => (float) (clone $approved)->sum('profit'),
             'total_revenue' => (float) (clone $approved)->sum('subtotal'),
             'approved_sales' => (int) (clone $approved)->count(),
             'pending_sales' => (int) Sale::query()->where('status', 'pending')->count(),
-            'today_sales' => (int) (clone $approved)->whereDate('approved_at', today())->count(),
-            'today_revenue' => (float) (clone $approved)->whereDate('approved_at', today())->sum('subtotal'),
+            'today_sales' => $todayCount,
+            'today_revenue' => $todayRev,
+            'today_avg_check' => $todayAvgCheck,
             'today_profit' => (float) (clone $approved)->whereDate('approved_at', today())->sum('profit'),
             'today_items_sold' => $this->todayItemsSold(),
+            'active_orders_count' => $activeOrders->count(),
             'week_revenue' => (float) (clone $approved)->whereBetween('approved_at', [now()->startOfWeek(), now()->endOfWeek()])->sum('subtotal'),
             'month_revenue' => (float) (clone $approved)->whereMonth('approved_at', now()->month)->whereYear('approved_at', now()->year)->sum('subtotal'),
             'products' => (int) Product::query()->count(),
@@ -44,6 +73,15 @@ class DashboardController extends Controller
 
         return response()->json([
             'summary' => $summary,
+            'shift' => [
+                'today_sales' => $todayCount,
+                'today_revenue' => $todayRev,
+                'today_avg_check' => $todayAvgCheck,
+                'today_items_sold' => $this->todayItemsSold(),
+                'active_orders_count' => $activeOrders->count(),
+                'active_orders' => $activeOrders,
+                'recent_sales' => $todayRecentSales,
+            ],
             'chart_days' => self::CHART_DAYS,
             'store_timezone' => config('app.timezone'),
             'sales_by_day' => $this->fillDays($salesByDay, $itemsByDay, $range),

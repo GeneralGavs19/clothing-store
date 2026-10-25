@@ -97,6 +97,7 @@
                 Название товара <span class="text-rose-500">*</span>
               </label>
               <input
+                ref="quickNameRef"
                 v-model="quickForm.name"
                 class="input mt-1"
                 placeholder="Например: Футболка Oversize Vintage"
@@ -243,61 +244,62 @@
               </div>
             </div>
 
-            <!-- Остаток после продажи (себестоимость полностью убрана) -->
-            <div>
-              <label class="block text-xs font-medium text-slate-700 dark:text-slate-300">
-                Остаток после продажи (шт.)
-              </label>
-              <input
-                v-model.number="quickForm.remaining_stock"
-                type="number"
-                min="0"
-                class="input mt-1 text-slate-600 dark:text-slate-400"
-                placeholder="0"
-              />
-              <p class="mt-1 text-[11px] text-slate-500">
-                Сколько штук осталось на руках/складе. Если склад пока не знаете — оставьте 0.
-              </p>
+            <!-- Дата оформления продажи и срок готовности заказа (при обычном стоит сегодняшняя, но можно менять) -->
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Дата оформления чека <span class="text-rose-500">*</span>
+                </label>
+                <input
+                  v-model="quickForm.sold_at"
+                  type="date"
+                  class="input mt-1 font-semibold text-xs"
+                  required
+                />
+                <p class="mt-1 text-[11px] text-slate-500">
+                  По умолчанию сегодняшняя дата. Можно выбрать любую другую.
+                </p>
+              </div>
+
+              <div v-if="quickForm.is_on_order">
+                <label class="block text-xs font-semibold text-amber-800 dark:text-amber-300">
+                  Срок готовности заказа (план)
+                </label>
+                <input
+                  v-model="quickForm.due_date"
+                  type="date"
+                  class="input mt-1 text-xs border-amber-300 dark:border-amber-700"
+                />
+                <p class="mt-1 text-[11px] text-amber-600/80 dark:text-amber-400/80">
+                  Ориентировочная дата выдачи покупателю
+                </p>
+              </div>
             </div>
 
-            <!-- Интерактивный расчет "Было" -->
-            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3.5 dark:border-slate-800 dark:bg-slate-900/60">
+            <!-- Сводный блок расчета чека -->
+            <div class="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 dark:border-slate-800 dark:bg-slate-900/60 space-y-2">
               <div class="flex items-center justify-between text-xs">
-                <span class="text-slate-500">Авторасчет по формуле:</span>
-                <span class="font-medium text-slate-700 dark:text-slate-300">Было = Продано + Остаток</span>
+                <span class="text-slate-500">Тип операции:</span>
+                <span
+                  class="rounded-full px-2 py-0.5 text-xs font-bold"
+                  :class="quickForm.is_on_order ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'"
+                >
+                  {{ quickForm.is_on_order ? '📦 На заказ' : 'В наличии' }}
+                </span>
               </div>
-              <div class="mt-2 grid grid-cols-3 gap-2 text-center text-xs">
-                <div class="rounded bg-white p-2 dark:bg-slate-800">
-                  <div class="text-[11px] text-slate-500">Продано</div>
-                  <div class="text-base font-bold text-emerald-600 dark:text-emerald-400">{{ quickForm.quantity || 1 }} шт.</div>
-                </div>
-                <div class="rounded bg-white p-2 dark:bg-slate-800">
-                  <div class="text-[11px] text-slate-500">Остаток</div>
-                  <div class="text-base font-bold text-slate-700 dark:text-slate-300">{{ quickForm.remaining_stock || 0 }} шт.</div>
-                </div>
-                <div class="rounded border border-emerald-300 bg-emerald-50 p-2 dark:border-emerald-800 dark:bg-emerald-950/60">
-                  <div class="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">Было учтено</div>
-                  <div class="text-base font-extrabold text-emerald-700 dark:text-emerald-300">
-                    {{ (Number(quickForm.quantity) || 1) + (Number(quickForm.remaining_stock) || 0) }} шт.
-                  </div>
-                </div>
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-slate-500">Количество позиций:</span>
+                <span class="font-bold text-slate-800 dark:text-slate-200">{{ quickForm.quantity || 1 }} шт.</span>
               </div>
-              <div class="mt-2.5 flex items-center justify-between border-t border-slate-200 pt-2 text-xs dark:border-slate-800">
-                <div class="flex items-center gap-1.5">
-                  <span class="text-slate-500">Тип:</span>
-                  <span
-                    class="rounded px-1.5 py-0.5 text-[11px] font-semibold"
-                    :class="quickForm.is_on_order ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'"
-                  >
-                    {{ quickForm.is_on_order ? '📦 На заказ' : 'В наличии' }}
-                  </span>
-                </div>
-                <div>
-                  <span class="text-slate-500 mr-1.5">Сумма продажи:</span>
-                  <span class="text-sm font-bold text-slate-900 dark:text-white">
-                    {{ money((Number(quickForm.sale_price) || 0) * (Number(quickForm.quantity) || 1)) }}
-                  </span>
-                </div>
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-slate-500">Цена за единицу:</span>
+                <span class="font-semibold text-slate-700 dark:text-slate-300">{{ money(quickForm.sale_price || 0) }}</span>
+              </div>
+              <div class="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-baseline justify-between">
+                <span class="text-sm font-semibold text-slate-700 dark:text-slate-300">Итого к оплате:</span>
+                <span class="text-xl font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
+                  {{ money((Number(quickForm.sale_price) || 0) * (Number(quickForm.quantity) || 1)) }}
+                </span>
               </div>
             </div>
 
@@ -328,9 +330,10 @@
         <div v-else>
           <div class="relative">
             <input
+              ref="searchInputRef"
               v-model="productSearch"
               class="input pr-10"
-              placeholder="Поиск товара по названию, виду, цвету..."
+              placeholder="Поиск товара по названию, виду, цвету... (быстрый фокус: Ctrl+K или /)"
               @input="debouncedProducts"
               @keyup.enter="debouncedProducts"
             />
@@ -377,17 +380,25 @@
               <div class="min-w-0 flex-1">
                 <div class="truncate text-sm font-medium">{{ product.name }}</div>
                 <div class="mt-0.5 text-xs text-slate-500">{{ productLineMeta(product) }}</div>
-                <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
                   <span class="rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
-                    Было: {{ product.initial_quantity || (product.display_quantity + product.stock_quantity) }} шт.
+                    Всего продано: {{ product.total_sold || 0 }} шт.
                   </span>
-                  <span>Продано: {{ product.total_sold || 0 }} шт.</span>
-                  <span>Остаток: {{ product.display_quantity + product.stock_quantity }} шт.</span>
+                  <span
+                    v-for="v in (product.variants || []).slice(0, 5)"
+                    :key="v.id"
+                    class="rounded border border-slate-200 bg-white px-1.5 py-0.2 text-[10px] font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                  >
+                    {{ v.size }}
+                  </span>
+                  <span v-if="(product.variants || []).length > 5" class="text-[10px] text-slate-400">
+                    +{{ (product.variants || []).length - 5 }}
+                  </span>
                 </div>
               </div>
               <div class="text-right">
                 <div class="text-sm font-semibold">{{ money(product.sale_price) }}</div>
-                <span class="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">Выбрать →</span>
+                <span class="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">Выбрать размер →</span>
               </div>
             </button>
           </div>
@@ -397,7 +408,7 @@
             <div class="flex items-center justify-between border-b border-slate-200 pb-2 dark:border-slate-800">
               <div>
                 <p class="text-sm font-semibold">{{ selectedProduct?.name }}</p>
-                <p class="text-xs text-slate-500">Выберите размер для добавления в чек</p>
+                <p class="text-xs text-slate-500">Нажмите на размер, чтобы добавить его в чек</p>
               </div>
               <button
                 type="button"
@@ -424,9 +435,9 @@
                     {{ money(v.sale_price || selectedProduct?.sale_price) }}
                   </span>
                 </div>
-                <div class="mt-1 flex items-center justify-between text-[11px] text-slate-500">
-                  <span>Остаток: <strong class="text-slate-700 dark:text-slate-300">{{ variantStock(v) }}</strong> шт.</span>
-                  <span>Было: <strong class="text-emerald-700 dark:text-emerald-300">{{ v.initial_quantity || variantStock(v) }}</strong></span>
+                <div class="mt-2 flex items-center justify-between text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                  <span>+ В чек</span>
+                  <span class="text-slate-400 text-[10px]">клик для выбора</span>
                 </div>
               </button>
             </div>
@@ -465,7 +476,7 @@
         <form v-else class="space-y-4" @submit.prevent="createSale">
           <!-- Переключатель: В наличии / На заказ для чека -->
           <div>
-            <label class="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               Тип заказа
             </label>
             <div class="grid grid-cols-2 gap-2 text-xs">
@@ -473,7 +484,7 @@
                 type="button"
                 class="flex items-center justify-center gap-1.5 rounded-lg border p-2 font-medium transition"
                 :class="!cartIsOnOrder
-                  ? 'border-emerald-500 bg-emerald-50 text-emerald-900 font-semibold shadow-sm dark:border-emerald-500 dark:bg-emerald-950/60 dark:text-emerald-200'
+                  ? 'border-emerald-500 bg-emerald-50 text-emerald-900 font-bold shadow-sm dark:border-emerald-500 dark:bg-emerald-950/60 dark:text-emerald-200'
                   : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400'"
                 @click="cartIsOnOrder = false"
               >
@@ -484,13 +495,41 @@
                 type="button"
                 class="flex items-center justify-center gap-1.5 rounded-lg border p-2 font-medium transition"
                 :class="cartIsOnOrder
-                  ? 'border-amber-500 bg-amber-50 text-amber-900 font-semibold shadow-sm dark:border-amber-500 dark:bg-amber-950/60 dark:text-amber-200'
+                  ? 'border-amber-500 bg-amber-50 text-amber-900 font-bold shadow-sm dark:border-amber-500 dark:bg-amber-950/60 dark:text-amber-200'
                   : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400'"
                 @click="cartIsOnOrder = true"
               >
                 <Package class="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
                 📦 На заказ
               </button>
+            </div>
+          </div>
+
+          <!-- Дата оформления чека и срок готовности (при обычном стоит сегодняшняя, но можно менять) -->
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Дата оформления чека <span class="text-rose-500">*</span>
+              </label>
+              <input
+                v-model="saleDate"
+                type="date"
+                class="input text-xs font-semibold"
+                required
+              />
+              <p class="mt-1 text-[10px] text-slate-400">По умолчанию сегодня. Можно выбрать другую дату.</p>
+            </div>
+
+            <div v-if="cartIsOnOrder">
+              <label class="block text-xs font-semibold text-amber-800 dark:text-amber-300 mb-1">
+                Срок готовности заказа (план)
+              </label>
+              <input
+                v-model="saleDueDate"
+                type="date"
+                class="input text-xs border-amber-300 dark:border-amber-700"
+              />
+              <p class="mt-1 text-[10px] text-amber-600/80 dark:text-amber-400/80">Ориентировочная дата выдачи</p>
             </div>
           </div>
 
@@ -714,6 +753,62 @@
           </div>
         </div>
 
+        <!-- Вторая строка фильтров: Периоды дат + Статус выполнения заказа -->
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/30 px-4 py-2 text-xs dark:border-slate-800 dark:bg-slate-900/20">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="text-slate-500 font-medium mr-1">Период:</span>
+            <button
+              v-for="p in [
+                { key: 'all', label: 'Все даты' },
+                { key: 'today', label: 'Сегодня' },
+                { key: 'yesterday', label: 'Вчера' },
+                { key: '7days', label: '7 дней' },
+                { key: 'custom', label: 'Период...' },
+              ]"
+              :key="p.key"
+              type="button"
+              class="rounded-md px-2.5 py-1 transition font-medium"
+              :class="historyDatePreset === p.key ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'"
+              @click="setHistoryDatePreset(p.key)"
+            >
+              {{ p.label }}
+            </button>
+
+            <!-- Поля произвольного периода -->
+            <div v-if="historyDatePreset === 'custom'" class="flex items-center gap-1.5 ml-2">
+              <input
+                v-model="historyDateFrom"
+                type="date"
+                class="input h-7 py-0.5 text-xs w-32"
+                @change="fetchHistory(1)"
+              />
+              <span class="text-slate-400">—</span>
+              <input
+                v-model="historyDateTo"
+                type="date"
+                class="input h-7 py-0.5 text-xs w-32"
+                @change="fetchHistory(1)"
+              />
+            </div>
+          </div>
+
+          <!-- Фильтр по статусу пошива / выполнения (если выбрано На заказ) -->
+          <div v-if="historyOrderType === 'on_order'" class="flex items-center gap-1.5">
+            <span class="text-slate-500 font-medium">Статус заказа:</span>
+            <select
+              v-model="historyFulfillment"
+              class="select h-7 py-0.5 text-xs w-36"
+              @change="fetchHistory(1)"
+            >
+              <option value="">Все этапы</option>
+              <option value="new">Новые</option>
+              <option value="in_progress">В пошиве</option>
+              <option value="ready">Готовы к выдаче</option>
+              <option value="delivered">Выданы</option>
+            </select>
+          </div>
+        </div>
+
         <!-- Список чеков -->
         <div v-if="sales.loading" class="p-6">
           <SkeletonBlock custom-class="h-44" />
@@ -723,7 +818,7 @@
           v-else-if="!sales.sales.length"
           class="m-6"
           title="Продажи не найдены"
-          :text="historySearch || historyOrderType ? 'Попробуйте сбросить фильтры поиска.' : 'Оформите первую продажу в форме сверху.'"
+          :text="historySearch || historyOrderType || historyDateFrom ? 'Попробуйте сбросить фильтры поиска.' : 'Оформите первую продажу в форме сверху.'"
         />
 
         <div v-else class="divide-y divide-slate-200 dark:divide-slate-800">
@@ -753,7 +848,51 @@
                     {{ sale.order_type_label || (sale.is_on_order ? 'На заказ' : 'В наличии') }}
                   </span>
 
-                  <!-- Статус -->
+                  <!-- Статус выполнения (для предзаказов) -->
+                  <span
+                    v-if="sale.is_on_order"
+                    class="rounded-full px-2 py-0.5 text-[11px] font-bold border"
+                    :class="getOrderStatusBadgeClass(sale.fulfillment_status)"
+                  >
+                    {{ getOrderStatusLabel(sale.fulfillment_status) }}
+                  </span>
+
+                  <!-- Срок готовности -->
+                  <span
+                    v-if="sale.is_on_order && sale.due_date"
+                    class="rounded bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-900 border border-amber-200 dark:border-amber-900 dark:bg-amber-950/70 dark:text-amber-300 inline-flex items-center gap-1"
+                  >
+                    <Calendar class="h-3 w-3 text-amber-600" />
+                    Срок: {{ formatDate(sale.due_date) }}
+                  </span>
+
+                  <!-- Быстрое продвижение статуса заказа на пошив -->
+                  <button
+                    v-if="sale.is_on_order && sale.status === 'approved' && (!sale.fulfillment_status || sale.fulfillment_status === 'new')"
+                    type="button"
+                    class="rounded bg-sky-100 hover:bg-sky-200 text-sky-800 dark:bg-sky-950 dark:text-sky-300 px-2 py-0.5 text-[10px] font-bold"
+                    @click="advanceOrderStatus(sale, 'in_progress')"
+                  >
+                    → В работу
+                  </button>
+                  <button
+                    v-else-if="sale.is_on_order && sale.status === 'approved' && sale.fulfillment_status === 'in_progress'"
+                    type="button"
+                    class="rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-2 py-0.5 text-[10px] font-bold"
+                    @click="advanceOrderStatus(sale, 'ready')"
+                  >
+                    → Готов к выдаче
+                  </button>
+                  <button
+                    v-else-if="sale.is_on_order && sale.status === 'approved' && sale.fulfillment_status === 'ready'"
+                    type="button"
+                    class="rounded bg-slate-200 hover:bg-slate-300 text-slate-800 dark:bg-slate-800 dark:text-slate-200 px-2 py-0.5 text-[10px] font-bold"
+                    @click="advanceOrderStatus(sale, 'delivered')"
+                  >
+                    → Выдан покупателю
+                  </button>
+
+                  <!-- Статус продажи -->
                   <span
                     class="badge text-[11px]"
                     :class="sale.status === 'approved' ? 'badge-success' : 'badge-danger'"
@@ -774,7 +913,7 @@
                 </div>
               </div>
 
-              <!-- Итоговая сумма чека и кнопки действий (Изменить, Удалить) -->
+              <!-- Итоговая сумма чека и кнопки действий -->
               <div class="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
                 <div class="text-right">
                   <div class="text-lg sm:text-xl font-black tabular-nums text-emerald-600 dark:text-emerald-400">
@@ -783,15 +922,38 @@
                 </div>
 
                 <div class="flex items-center gap-1.5">
+                  <!-- Кнопка: Повторить чек (копировать в кассу) -->
+                  <button
+                    type="button"
+                    class="btn-muted h-8 px-2 text-xs flex items-center gap-1 font-semibold text-slate-700 hover:border-sky-400 hover:text-sky-600 dark:text-slate-300 dark:hover:text-sky-400"
+                    title="Скопировать товары этого чека в кассу"
+                    @click="duplicateSaleToCart(sale)"
+                  >
+                    <Copy class="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
+                    <span class="hidden sm:inline">Повторить</span>
+                  </button>
+
                   <!-- Кнопка: Изменить продажу -->
                   <button
                     type="button"
-                    class="btn-muted h-8 px-2.5 text-xs flex items-center gap-1 font-semibold text-slate-700 hover:border-emerald-400 hover:text-emerald-600 dark:text-slate-300 dark:hover:text-emerald-400"
+                    class="btn-muted h-8 px-2 text-xs flex items-center gap-1 font-semibold text-slate-700 hover:border-emerald-400 hover:text-emerald-600 dark:text-slate-300 dark:hover:text-emerald-400"
                     title="Изменить продажу"
                     @click="openEditModal(sale)"
                   >
                     <Pencil class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                    <span>Изменить</span>
+                    <span class="hidden sm:inline">Изменить</span>
+                  </button>
+
+                  <!-- Кнопка: Отменить продажу -->
+                  <button
+                    v-if="sale.status === 'approved'"
+                    type="button"
+                    class="btn-muted h-8 px-2 text-xs flex items-center gap-1 font-semibold text-slate-700 hover:border-rose-400 hover:text-rose-600 dark:text-slate-300 dark:hover:text-rose-400"
+                    title="Безопасно отменить чек"
+                    @click="openCancelModal(sale)"
+                  >
+                    <Ban class="h-3.5 w-3.5 text-rose-500" />
+                    <span class="hidden sm:inline">Отменить</span>
                   </button>
 
                   <!-- Кнопка: Удалить продажу -->
@@ -799,7 +961,7 @@
                     v-if="auth.isAdmin"
                     type="button"
                     class="btn-danger h-8 w-8 px-0"
-                    title="Удалить продажу"
+                    title="Удалить чек навсегда"
                     @click="confirmDeleteSale(sale)"
                   >
                     <Trash2 class="h-3.5 w-3.5" />
@@ -1081,6 +1243,46 @@
             </div>
           </div>
 
+          <!-- Дата оформления чека и срок готовности заказа -->
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Дата оформления чека <span class="text-rose-500">*</span>
+              </label>
+              <input
+                v-model="editForm.sold_at"
+                type="date"
+                class="input text-xs font-semibold"
+                required
+              />
+              <p class="mt-0.5 text-[10px] text-slate-400">Дата фиксации продажи в отчетности</p>
+            </div>
+
+            <div v-if="editForm.is_on_order">
+              <label class="block text-xs font-semibold text-amber-800 dark:text-amber-300 mb-1">
+                Срок готовности заказа (план)
+              </label>
+              <input
+                v-model="editForm.due_date"
+                type="date"
+                class="input text-xs border-amber-300 dark:border-amber-700"
+              />
+            </div>
+          </div>
+
+          <div v-if="editForm.is_on_order">
+            <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Статус выполнения заказа
+            </label>
+            <select v-model="editForm.fulfillment_status" class="select text-xs">
+              <option value="new">Новый заказ</option>
+              <option value="in_progress">В пошиве / в работе</option>
+              <option value="ready">Готов к выдаче</option>
+              <option value="delivered">Выдан покупателю</option>
+              <option value="cancelled">Отменен</option>
+            </select>
+          </div>
+
           <!-- Товары в чеке -->
           <div>
             <div class="flex items-center justify-between mb-2">
@@ -1276,14 +1478,62 @@
         </form>
       </div>
     </div>
+
+    <!-- МОДАЛЬНОЕ ОКНО: БЕЗОПАСНАЯ ОТМЕНА ЧЕКА -->
+    <div
+      v-if="cancelModalOpen"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      @click.self="cancelModalOpen = false"
+    >
+      <div class="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+        <div class="flex items-center gap-2.5 text-rose-600 dark:text-rose-400">
+          <Ban class="h-5 w-5" />
+          <h3 class="font-bold text-base text-slate-900 dark:text-white">Отмена чека №{{ saleToCancel?.id }}</h3>
+        </div>
+        <p class="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+          Чек будет переведен в статус <b>«Отменен»</b>, а выручка (<b>{{ money(saleToCancel?.subtotal) }}</b>) будет безопасно исключена из отчетов смены и аналитики без удаления чека из базы данных.
+        </p>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+            Причина отмены (необязательно)
+          </label>
+          <input
+            v-model="cancelReason"
+            class="input text-xs"
+            placeholder="Например: возврат покупателя, ошибка кассира..."
+            autofocus
+            @keyup.enter="submitCancelSale"
+          />
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+          <button type="button" class="btn-muted h-8 px-3 text-xs" @click="cancelModalOpen = false">
+            Не отменять
+          </button>
+          <button
+            type="button"
+            class="btn-danger h-8 px-4 text-xs font-semibold flex items-center gap-1.5"
+            :disabled="cancelling"
+            @click="submitCancelSale"
+          >
+            <LoaderCircle v-if="cancelling" class="h-3.5 w-3.5 animate-spin" />
+            <span v-else>Подтвердить отмену чека</span>
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
+  ArrowRight,
+  Ban,
+  Calendar,
   Check,
   ChevronDown,
+  Clock,
+  Copy,
   Download,
   Layers,
   LoaderCircle,
@@ -1305,18 +1555,64 @@ import { useToastStore } from '../stores/toasts'
 import EmptyState from '../components/ui/EmptyState.vue'
 import PaginationBar from '../components/ui/PaginationBar.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
-import { date, money } from '../utils/formatters'
+import { date, formatDate, money } from '../utils/formatters'
+
+function getTodayIsoDate() {
+  const d = new Date()
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function getOrderStatusLabel(status) {
+  switch (status) {
+    case 'in_progress':
+      return 'В пошиве'
+    case 'ready':
+      return 'Готов к выдаче'
+    case 'delivered':
+      return 'Выдан'
+    case 'cancelled':
+      return 'Отменен'
+    default:
+      return 'Новый заказ'
+  }
+}
+
+function getOrderStatusBadgeClass(status) {
+  switch (status) {
+    case 'in_progress':
+      return 'border-sky-300 bg-sky-50 text-sky-900 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-300'
+    case 'ready':
+      return 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+    case 'delivered':
+      return 'border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+    case 'cancelled':
+      return 'border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-300'
+    default:
+      return 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300'
+  }
+}
 
 const auth = useAuthStore()
 const catalog = useCatalogStore()
 const sales = useSalesStore()
 const toast = useToastStore()
 
+const searchInputRef = ref(null)
+const quickNameRef = ref(null)
+
 const activeMode = ref('catalog') // 'catalog' | 'quick'
 const productSearch = ref('')
 const historySearch = ref('')
 const historyStatus = ref('approved')
 const historyOrderType = ref('') // '' (all) | 'in_stock' | 'on_order'
+const historyDatePreset = ref('all') // 'all' | 'today' | 'yesterday' | '7days' | 'custom'
+const historyDateFrom = ref('')
+const historyDateTo = ref('')
+const historyFulfillment = ref('')
+
 const historyViewMode = ref('orders') // 'orders' | 'summary'
 const summaryLoading = ref(false)
 const summaryTypes = ref([])
@@ -1326,6 +1622,9 @@ const allSummaryExpanded = ref(true)
 const editingSale = ref(null)
 const editForm = ref({
   is_on_order: false,
+  sold_at: '',
+  due_date: '',
+  fulfillment_status: 'new',
   cashier_note: '',
   items: [],
 })
@@ -1338,10 +1637,17 @@ const newItemVariants = ref([])
 
 const cart = ref([])
 const cartIsOnOrder = ref(false)
+const saleDate = ref(getTodayIsoDate())
+const saleDueDate = ref('')
 const cashierNote = ref('')
 const saving = ref(false)
 const quickSaving = ref(false)
 const quickCustomCategory = ref(false)
+
+const cancelModalOpen = ref(false)
+const saleToCancel = ref(null)
+const cancelReason = ref('')
+const cancelling = ref(false)
 
 const saleStep = ref('products')
 const selectedProduct = ref(null)
@@ -1370,20 +1676,21 @@ const popularTypes = [
   'Аксессуары',
 ]
 
-const commonSizes = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', 'One Size']
+const commonSizes = ['116', '122', '128', '134', '140', '146', '152', '158', '164', 'XS', 'S', 'M', 'L']
 
 const quickForm = ref({
   name: '',
   type: 'Футболка',
   category_id: '',
   category_name: '',
-  size: 'M',
+  size: '128',
   color: '',
   sale_price: '',
   purchase_price: 0,
+  sold_at: getTodayIsoDate(),
+  due_date: '',
   is_on_order: false,
   quantity: 1,
-  remaining_stock: 0,
   cashier_note: '',
 })
 
@@ -1517,7 +1824,7 @@ function goBackStep() {
 }
 
 async function createSale() {
-  if (!cart.value.length) return
+  if (!cart.value.length || saving.value) return
   saving.value = true
   try {
     await sales.create({
@@ -1527,13 +1834,21 @@ async function createSale() {
         quantity: row.quantity,
         source: 'display',
       })),
+      sold_at: saleDate.value || undefined,
+      due_date: cartIsOnOrder.value && saleDueDate.value ? saleDueDate.value : undefined,
+      fulfillment_status: cartIsOnOrder.value ? 'new' : undefined,
       is_on_order: Boolean(cartIsOnOrder.value),
       cashier_note: cashierNote.value ? cashierNote.value.trim() : null,
     })
     toast.push('Продажа успешно оформлена!')
     cart.value = []
     cartIsOnOrder.value = false
+    saleDate.value = getTodayIsoDate()
+    saleDueDate.value = ''
     cashierNote.value = ''
+    try {
+      localStorage.removeItem('clothing_store_cart_v1')
+    } catch (e) {}
     await refreshAll()
   } catch (error) {
     toast.push(apiError(error), 'error')
@@ -1543,6 +1858,7 @@ async function createSale() {
 }
 
 async function submitQuickSale() {
+  if (quickSaving.value) return
   if (!quickForm.value.name || !quickForm.value.sale_price) {
     toast.push('Укажите название и цену продажи', 'warning')
     return
@@ -1555,20 +1871,21 @@ async function submitQuickSale() {
       type: quickForm.value.type ? quickForm.value.type.trim() : null,
       category_id: quickForm.value.category_id || undefined,
       category_name: quickForm.value.category_name ? quickForm.value.category_name.trim() : undefined,
-      size: quickForm.value.size ? quickForm.value.size.trim() : 'M',
+      size: quickForm.value.size ? quickForm.value.size.trim() : '128',
       color: quickForm.value.color ? quickForm.value.color.trim() : null,
       sale_price: Number(quickForm.value.sale_price),
-      purchase_price: 0, // Себестоимость убрана из формы
+      purchase_price: 0,
+      sold_at: quickForm.value.sold_at || undefined,
+      due_date: quickForm.value.is_on_order && quickForm.value.due_date ? quickForm.value.due_date : undefined,
+      fulfillment_status: quickForm.value.is_on_order ? 'new' : undefined,
       is_on_order: Boolean(quickForm.value.is_on_order),
       quantity: Math.max(1, Number(quickForm.value.quantity || 1)),
-      remaining_stock: Math.max(0, Number(quickForm.value.remaining_stock || 0)),
       cashier_note: quickForm.value.cashier_note ? quickForm.value.cashier_note.trim() : null,
     }
 
     await sales.createQuick(payload)
-    toast.push(`Товар «${payload.name}» создан и продажа успешно оформлена!`)
+    toast.push(`Товар «${payload.name}» оформлен!`)
 
-    // Сброс формы для следующей продажи
     const lastType = quickForm.value.type
     const lastCatId = quickForm.value.category_id
     quickForm.value = {
@@ -1576,13 +1893,14 @@ async function submitQuickSale() {
       type: lastType,
       category_id: lastCatId,
       category_name: '',
-      size: 'M',
+      size: '128',
       color: '',
       sale_price: '',
       purchase_price: 0,
+      sold_at: getTodayIsoDate(),
+      due_date: '',
       is_on_order: false,
       quantity: 1,
-      remaining_stock: 0,
       cashier_note: '',
     }
 
@@ -1613,6 +1931,36 @@ function setHistoryOrderType(val) {
   fetchHistory(1)
 }
 
+function setHistoryDatePreset(key) {
+  historyDatePreset.value = key
+  const today = new Date()
+  const toIso = (d) => {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+
+  if (key === 'all') {
+    historyDateFrom.value = ''
+    historyDateTo.value = ''
+  } else if (key === 'today') {
+    historyDateFrom.value = toIso(today)
+    historyDateTo.value = toIso(today)
+  } else if (key === 'yesterday') {
+    const yest = new Date(today)
+    yest.setDate(yest.getDate() - 1)
+    historyDateFrom.value = toIso(yest)
+    historyDateTo.value = toIso(yest)
+  } else if (key === '7days') {
+    const past = new Date(today)
+    past.setDate(past.getDate() - 6)
+    historyDateFrom.value = toIso(past)
+    historyDateTo.value = toIso(today)
+  }
+  fetchHistory(1)
+}
+
 async function fetchHistory(page = 1) {
   const params = {
     page,
@@ -1624,7 +1972,90 @@ async function fetchHistory(page = 1) {
   } else if (historyOrderType.value === 'in_stock') {
     params.is_on_order = false
   }
+  if (historyFulfillment.value) {
+    params.fulfillment_status = historyFulfillment.value
+  }
+  if (historyDateFrom.value) {
+    params.date_from = historyDateFrom.value
+  }
+  if (historyDateTo.value) {
+    params.date_to = historyDateTo.value
+  }
   await sales.fetch(params)
+}
+
+function duplicateSaleToCart(sale) {
+  if (!sale || !sale.items?.length) return
+
+  const itemsToAdd = sale.items.map((i) => ({
+    product: i.product || {
+      id: i.product_id,
+      name: i.product_name || 'Товар',
+      type: i.product_type,
+      sale_price: i.sale_price,
+    },
+    product_variant_id: i.product_variant_id,
+    variant: {
+      id: i.product_variant_id,
+      size: i.variant_size || '—',
+      sale_price: i.sale_price,
+    },
+    price: Number(i.sale_price) || 0,
+    quantity: Number(i.quantity) || 1,
+  }))
+
+  cart.value = [...cart.value, ...itemsToAdd]
+  cartIsOnOrder.value = Boolean(sale.is_on_order)
+  if (sale.cashier_note) {
+    cashierNote.value = `[Повтор чека №${sale.id}] ${sale.cashier_note}`
+  }
+
+  toast.push(`Позиции из чека №${sale.id} добавлены в корзину кассы!`, 'success')
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function openCancelModal(sale) {
+  saleToCancel.value = sale
+  cancelReason.value = ''
+  cancelModalOpen.value = true
+}
+
+async function submitCancelSale() {
+  if (!saleToCancel.value) return
+  cancelling.value = true
+  try {
+    await sales.cancelSale(saleToCancel.value.id, cancelReason.value)
+    toast.push(`Чек №${saleToCancel.value.id} успешно отменен. Выручка пересчитана.`)
+    cancelModalOpen.value = false
+    saleToCancel.value = null
+    await refreshAll()
+  } catch (err) {
+    toast.push(apiError(err), 'error')
+  } finally {
+    cancelling.value = false
+  }
+}
+
+async function advanceOrderStatus(sale, nextStatus) {
+  try {
+    await api.put(`/sales/${sale.id}`, {
+      is_on_order: true,
+      fulfillment_status: nextStatus,
+      items: (sale.items || []).map((i) => ({
+        product_id: i.product_id || undefined,
+        product_variant_id: i.product_variant_id || undefined,
+        product_name: i.product_name,
+        product_type: i.product_type,
+        variant_size: i.variant_size,
+        quantity: i.quantity,
+        sale_price: i.sale_price,
+      })),
+    })
+    toast.push(`Статус заказа №${sale.id} обновлен!`)
+    await fetchHistory(sales.meta?.current_page || 1)
+  } catch (err) {
+    toast.push(apiError(err), 'error')
+  }
 }
 
 async function refreshAll() {
@@ -1692,8 +2123,13 @@ function getSaleProductTitle(sale) {
 
 function openEditModal(sale) {
   editingSale.value = sale
+  const at = sale.sold_at || sale.approved_at || sale.created_at
+  const initialDate = at ? at.slice(0, 10) : getTodayIsoDate()
   editForm.value = {
     is_on_order: Boolean(sale.is_on_order),
+    sold_at: initialDate,
+    due_date: sale.due_date ? sale.due_date.slice(0, 10) : '',
+    fulfillment_status: sale.fulfillment_status || 'new',
     cashier_note: sale.cashier_note || '',
     items: (sale.items || []).map((it) => ({
       product_id: it.product_id,
@@ -1778,6 +2214,9 @@ async function saveEditSale() {
   try {
     await sales.updateSale(editingSale.value.id, {
       is_on_order: Boolean(editForm.value.is_on_order),
+      sold_at: editForm.value.sold_at || undefined,
+      due_date: editForm.value.is_on_order && editForm.value.due_date ? editForm.value.due_date : null,
+      fulfillment_status: editForm.value.is_on_order ? editForm.value.fulfillment_status : null,
       cashier_note: editForm.value.cashier_note ? editForm.value.cashier_note.trim() : null,
       items: editForm.value.items.map((it) => ({
         product_id: it.product_id || undefined,
@@ -1851,9 +2290,87 @@ function toggleAllSummaryTypes() {
 }
 
 onMounted(() => {
+  // Restore cart draft from localStorage
+  try {
+    const saved = localStorage.getItem('clothing_store_cart_v1')
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        cart.value = parsed
+      }
+    }
+  } catch (e) {}
+
+  // Auto focus on search input
+  nextTick(() => {
+    searchInputRef.value?.focus()
+  })
+
+  // Global hotkeys
+  const handleKeydown = (e) => {
+    const isEditing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target?.tagName)
+
+    // Ctrl+K or / (when not typing) -> Focus search
+    if ((e.ctrlKey && e.key.toLowerCase() === 'k') || (e.key === '/' && !isEditing)) {
+      e.preventDefault()
+      if (activeMode.value !== 'catalog') {
+        switchMode('catalog')
+      }
+      nextTick(() => searchInputRef.value?.focus())
+    }
+
+    // F2 or Ctrl+Enter -> Checkout / submit active sale
+    if (e.key === 'F2' || (e.ctrlKey && e.key === 'Enter')) {
+      e.preventDefault()
+      if (activeMode.value === 'catalog' && cart.value.length) {
+        createSale()
+      } else if (activeMode.value === 'quick' && quickForm.value.name && quickForm.value.sale_price) {
+        submitQuickSale()
+      }
+    }
+
+    // Alt+1 -> Catalog mode, Alt+2 -> Quick mode
+    if (e.altKey && e.key === '1') {
+      e.preventDefault()
+      switchMode('catalog')
+      nextTick(() => searchInputRef.value?.focus())
+    } else if (e.altKey && e.key === '2') {
+      e.preventDefault()
+      switchMode('quick')
+      nextTick(() => quickNameRef.value?.focus())
+    }
+
+    // Esc -> Clear search or close modals
+    if (e.key === 'Escape') {
+      if (cancelModalOpen.value) {
+        cancelModalOpen.value = false
+      } else if (editingSale.value) {
+        closeEditModal()
+      } else if (productSearch.value) {
+        productSearch.value = ''
+        fetchProducts()
+      }
+    }
+  }
+
+  window.addEventListener('keydown', handleKeydown)
   refreshAll()
   timer = window.setInterval(refreshAll, 15000)
+
+  onUnmounted(() => {
+    window.removeEventListener('keydown', handleKeydown)
+    window.clearInterval(timer)
+  })
 })
 
-onUnmounted(() => window.clearInterval(timer))
+// Auto-save cart to localStorage
+watch(
+  cart,
+  (newCart) => {
+    try {
+      localStorage.setItem('clothing_store_cart_v1', JSON.stringify(newCart))
+    } catch (e) {}
+  },
+  { deep: true },
+)
 </script>

@@ -43,6 +43,15 @@ export const useSalesStore = defineStore('sales', {
     async reject(id, admin_note = '') {
       return api.post(`/sales/${id}/reject`, { admin_note })
     },
+    async cancelSale(id, cancel_reason = '') {
+      const res = await api.post(`/sales/${id}/cancel`, { cancel_reason })
+      const updated = res.data
+      const idx = this.sales.findIndex((s) => s.id === id)
+      if (idx !== -1) {
+        this.sales[idx] = updated
+      }
+      return res
+    },
     async deleteSale(id) {
       return api.delete(`/sales/${id}`)
     },

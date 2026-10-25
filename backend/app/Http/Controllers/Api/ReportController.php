@@ -676,6 +676,7 @@ class ReportController extends Controller
             ->leftJoin('products', 'products.id', '=', 'sale_items.product_id')
             ->leftJoin('categories', 'categories.id', '=', 'products.category_id')
             ->leftJoin('product_variants', 'product_variants.id', '=', 'sale_items.product_variant_id')
+            ->leftJoin('users as cashiers', 'cashiers.id', '=', 'sales.cashier_id')
             ->where('sales.status', 'approved');
 
         if ($dateFrom) {
@@ -744,6 +745,8 @@ class ReportController extends Controller
             'sale_items.line_profit',
             'sales.is_on_order as sale_is_on_order',
             'sales.approved_at',
+            'sales.cashier_id',
+            'cashiers.name as cashier_name',
             'products.name as live_product_name',
             'products.type as live_product_type',
             'products.color as live_product_color',
@@ -1191,6 +1194,65 @@ class ReportController extends Controller
             return $p;
         })->sortByDesc('sold_quantity')->values()->all();
 
+        // ========================================================
+        // 7. ГРУППИРОВКА 4: ПО КАССИРАМ И СМЕНАМ СОТРУДНИКОВ
+        // ========================================================
+        $cashiersMap = [];
+        foreach ($saleItems as $item) {
+            $cId = (int) ($item->cashier_id ?: 0);
+            $cName = trim((string) ($item->cashier_name ?: 'Без кассира'));
+            $sId = $item->sale_id;
+
+            if (! isset($cashiersMap[$cId])) {
+                $cashiersMap[$cId] = [
+                    'cashier_id' => $cId ?: null,
+                    'cashier_name' => $cName,
+                    'sales_ids' => [],
+                    'sold_quantity' => 0,
+                    'in_stock_sold' => 0,
+                    'on_order_sold' => 0,
+                    'revenue' => 0.0,
+                    'in_stock_revenue' => 0.0,
+                    'on_order_revenue' => 0.0,
+                    'profit' => 0.0,
+                ];
+            }
+
+            $cashiersMap[$cId]['sales_ids'][$sId] = true;
+            $qty = (int) $item->quantity;
+            $lineTotal = (float) $item->line_total;
+            $lineProfit = (float) $item->line_profit;
+            $isOnOrder = $item->item_is_on_order !== null ? (bool) $item->item_is_on_order : (bool) $item->sale_is_on_order;
+
+            $cashiersMap[$cId]['sold_quantity'] += $qty;
+            $cashiersMap[$cId]['revenue'] += $lineTotal;
+            $cashiersMap[$cId]['profit'] += $lineProfit;
+
+            if ($isOnOrder) {
+                $cashiersMap[$cId]['on_order_sold'] += $qty;
+                $cashiersMap[$cId]['on_order_revenue'] += $lineTotal;
+            } else {
+                $cashiersMap[$cId]['in_stock_sold'] += $qty;
+                $cashiersMap[$cId]['in_stock_revenue'] += $lineTotal;
+            }
+        }
+
+        $byCashier = collect($cashiersMap)->map(function ($c) use ($totalRevenue, $totalSoldUnits) {
+            $salesCount = count($c['sales_ids']);
+            $revenue = round((float) $c['revenue'], 2);
+            $c['sales_count'] = $salesCount;
+            $c['average_check'] = $salesCount > 0 ? round($revenue / $salesCount, 2) : 0;
+            $c['revenue'] = $revenue;
+            $c['in_stock_revenue'] = round((float) $c['in_stock_revenue'], 2);
+            $c['on_order_revenue'] = round((float) $c['on_order_revenue'], 2);
+            $c['profit'] = round((float) $c['profit'], 2);
+            $c['revenue_percent'] = $totalRevenue > 0 ? round(($revenue / $totalRevenue) * 100, 1) : 0;
+            $c['units_percent'] = $totalSoldUnits > 0 ? round(($c['sold_quantity'] / $totalSoldUnits) * 100, 1) : 0;
+            unset($c['sales_ids']);
+
+            return $c;
+        })->sortByDesc('revenue')->values()->all();
+
         // ТОП-5 товаров и ТОП-5 размеров
         $topProducts = collect($topProductsMap)
             ->sortByDesc('sold_quantity')
@@ -1253,6 +1315,7 @@ class ReportController extends Controller
             'by_type' => $byType,
             'by_category' => $byCategory,
             'by_product' => $byProduct,
+            'by_cashier' => $byCashier,
             'filters' => [
                 'date_from' => $dateFrom?->toDateString(),
                 'date_to' => $dateTo?->toDateString(),

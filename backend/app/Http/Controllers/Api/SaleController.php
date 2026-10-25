@@ -53,6 +53,10 @@ class SaleController extends Controller
             $query->where('is_on_order', $request->boolean('is_on_order'));
         }
 
+        if ($request->filled('fulfillment_status')) {
+            $query->where('fulfillment_status', $request->string('fulfillment_status')->toString());
+        }
+
         $query->orderByDesc('approved_at')->orderByDesc('id');
 
         return response()->json(ApiPagination::format($query->paginate($request->integer('per_page', 15))));
@@ -69,6 +73,9 @@ class SaleController extends Controller
             'items.*.source' => ['nullable', 'in:display,stock'],
             'is_on_order' => ['nullable', 'boolean'],
             'cashier_note' => ['nullable', 'string', 'max:1000'],
+            'sold_at' => ['nullable', 'date'],
+            'due_date' => ['nullable', 'date'],
+            'fulfillment_status' => ['nullable', 'string', 'in:new,in_progress,ready,delivered,cancelled'],
         ]);
 
         foreach ($data['items'] as $index => $row) {
@@ -86,7 +93,10 @@ class SaleController extends Controller
             $request->user(),
             $data['items'],
             isset($data['cashier_note']) ? strip_tags($data['cashier_note']) : null,
-            (bool) ($data['is_on_order'] ?? false)
+            (bool) ($data['is_on_order'] ?? false),
+            $data['sold_at'] ?? null,
+            $data['due_date'] ?? null,
+            $data['fulfillment_status'] ?? null
         );
 
         $logger->log('sales.created', $sale, ['number' => $sale->number], $request);
@@ -109,6 +119,9 @@ class SaleController extends Controller
             'remaining_stock' => ['nullable', 'integer', 'min:0'],
             'is_on_order' => ['nullable', 'boolean'],
             'cashier_note' => ['nullable', 'string', 'max:1000'],
+            'sold_at' => ['nullable', 'date'],
+            'due_date' => ['nullable', 'date'],
+            'fulfillment_status' => ['nullable', 'string', 'in:new,in_progress,ready,delivered,cancelled'],
         ]);
 
         $result = $sales->createQuickSale($request->user(), $data);
@@ -151,10 +164,46 @@ class SaleController extends Controller
         return response()->json($sale);
     }
 
+    public function cancel(Request $request, Sale $sale, SalesService $sales, ActivityLogger $logger)
+    {
+        $data = $request->validate([
+            'cancel_reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        if ($request->user()->isCashier() && (int) $sale->cashier_id !== (int) $request->user()->id) {
+            abort(403, 'Вы можете отменять только свои продажи.');
+        }
+
+        $sale->load(['items', 'cashier']);
+        $metaBefore = [
+            'sale_id' => $sale->id,
+            'number' => $sale->number,
+            'subtotal' => (float) $sale->subtotal,
+            'reason' => $data['cancel_reason'] ?? 'Отмена операции',
+            'cancelled_by' => $request->user()->only(['id', 'name', 'role']),
+            'items' => $sale->items->map(fn ($i) => [
+                'name' => $i->product_name,
+                'size' => $i->variant_size,
+                'quantity' => (int) $i->quantity,
+                'sale_price' => (float) $i->sale_price,
+                'line_total' => (float) $i->line_total,
+            ])->all(),
+        ];
+
+        $cancelledSale = $sales->cancelSale($sale, $request->user(), $data['cancel_reason'] ?? null);
+
+        $logger->log('sales.cancelled', $cancelledSale, $metaBefore, $request);
+
+        return response()->json($cancelledSale);
+    }
+
     public function update(Request $request, Sale $sale, SalesService $sales, ActivityLogger $logger)
     {
         $data = $request->validate([
             'is_on_order' => ['nullable', 'boolean'],
+            'due_date' => ['nullable', 'date'],
+            'fulfillment_status' => ['nullable', 'string', 'in:new,in_progress,ready,delivered,cancelled'],
+            'sold_at' => ['nullable', 'date'],
             'cashier_note' => ['nullable', 'string', 'max:1000'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['nullable', 'exists:products,id'],
@@ -167,11 +216,23 @@ class SaleController extends Controller
             'items.*.source' => ['nullable', 'in:display,stock'],
         ]);
 
+        $sale->load(['items']);
+        $oldItems = $sale->items->map(fn ($i) => [
+            'name' => $i->product_name,
+            'size' => $i->variant_size,
+            'quantity' => (int) $i->quantity,
+            'sale_price' => (float) $i->sale_price,
+            'line_total' => (float) $i->line_total,
+        ])->all();
+
         $updatedSale = $sales->updateSale($sale, $data, $request->user());
 
         $logger->log('sales.updated', $updatedSale, [
             'number' => $updatedSale->number,
-            'subtotal' => (float) $updatedSale->subtotal,
+            'old_subtotal' => (float) $sale->subtotal,
+            'new_subtotal' => (float) $updatedSale->subtotal,
+            'old_items' => $oldItems,
+            'new_items' => $data['items'],
         ], $request);
 
         return response()->json($updatedSale);

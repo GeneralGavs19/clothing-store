@@ -15,6 +15,8 @@ class Sale extends Model
         'approved_by',
         'status',
         'is_on_order',
+        'due_date',
+        'fulfillment_status',
         'subtotal',
         'profit',
         'cashier_note',
@@ -24,16 +26,28 @@ class Sale extends Model
         'rejected_at',
     ];
 
-    protected $appends = ['display_title', 'sold_at', 'order_type_label'];
+    protected $appends = ['display_title', 'sold_at', 'order_type_label', 'fulfillment_status_label'];
 
     protected $casts = [
         'is_on_order' => 'boolean',
+        'due_date' => 'date',
         'subtotal' => 'decimal:2',
         'profit' => 'decimal:2',
         'submitted_at' => 'datetime',
         'approved_at' => 'datetime',
         'rejected_at' => 'datetime',
     ];
+
+    public function getFulfillmentStatusLabelAttribute(): string
+    {
+        return match ($this->fulfillment_status) {
+            'in_progress' => 'В работе',
+            'ready' => 'Готов к выдаче',
+            'delivered' => 'Выдан',
+            'cancelled' => 'Отменен',
+            default => 'Новый заказ',
+        };
+    }
 
     public function getOrderTypeLabelAttribute(): string
     {

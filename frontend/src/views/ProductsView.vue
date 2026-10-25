@@ -64,11 +64,12 @@
                 {{ variantSummaryLine(product) }}
               </p>
               <div class="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                <span class="rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
-                  Было: {{ product.initial_quantity || (product.display_quantity + product.stock_quantity) }} шт.
+                <span class="rounded bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                  Продано: {{ product.total_sold || 0 }} шт.
                 </span>
-                <span>Продано: {{ product.total_sold || 0 }} шт.</span>
-                <span>Остаток: {{ product.display_quantity + product.stock_quantity }} шт.</span>
+                <span class="rounded bg-slate-100 px-2 py-0.5 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  Размеров в сетке: {{ product.variants_count || product.variants?.length || 0 }}
+                </span>
               </div>
             </RouterLink>
           </div>
@@ -150,11 +151,74 @@
         <div ref="variantTableRef" class="block space-y-3 sm:col-span-2">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <span class="text-sm font-medium">Размеры и остатки</span>
-              <p class="text-xs text-slate-500">Укажите размер и количество товара в магазине</p>
+              <span class="text-sm font-semibold">Размеры модели</span>
+              <p class="text-xs text-slate-500">Добавьте нужные размеры вручную или кликом по готовой размерной сетке</p>
             </div>
             <div class="flex flex-wrap gap-2">
-              <button type="button" class="btn-primary h-8 px-2.5 text-xs" @click="addVariantRow">+ Размер</button>
+              <button type="button" class="btn-primary h-8 px-2.5 text-xs font-semibold" @click="addVariantRow">
+                + Добавить размер
+              </button>
+            </div>
+          </div>
+
+          <!-- Быстрый выбор размерных сеток и массовое добавление -->
+          <div class="rounded-lg border border-slate-200 bg-slate-50/80 p-3 text-xs dark:border-slate-800 dark:bg-slate-900/60 space-y-2.5">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-semibold text-slate-600 dark:text-slate-400">Быстрые наборы:</span>
+              <button
+                type="button"
+                class="rounded-md border border-emerald-300 bg-white px-2 py-1 font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:bg-slate-800 dark:text-emerald-300"
+                @click="addPresetSizes(schoolSizes)"
+              >
+                + Школьная форма (116–164)
+              </button>
+              <button
+                type="button"
+                class="rounded-md border border-slate-300 bg-white px-2 py-1 font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                @click="addPresetSizes(letterSizes)"
+              >
+                + Буквы (XXS–XXL)
+              </button>
+              <button
+                type="button"
+                class="rounded-md border border-slate-300 bg-white px-2 py-1 font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                @click="addPresetSizes(toddlerSizes)"
+              >
+                + Малыши (86–110)
+              </button>
+            </div>
+
+            <!-- Чипы популярных размеров -->
+            <div class="flex flex-wrap items-center gap-1.5 pt-1">
+              <span class="text-[11px] text-slate-500 mr-1">Быстрый клик:</span>
+              <button
+                v-for="sz in [...schoolSizes, ...letterSizes.slice(1, 5)]"
+                :key="sz"
+                type="button"
+                class="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold hover:border-emerald-500 hover:text-emerald-600 dark:border-slate-700 dark:bg-slate-900"
+                :class="isSizeAlreadyAdded(sz) ? 'opacity-40 line-through' : 'text-slate-700 dark:text-slate-300'"
+                :title="isSizeAlreadyAdded(sz) ? 'Размер уже добавлен' : `Добавить размер ${sz}`"
+                @click="addSingleSize(sz)"
+              >
+                {{ sz }}
+              </button>
+            </div>
+
+            <!-- Вставка списка через запятую -->
+            <div class="flex items-center gap-2 pt-1">
+              <input
+                v-model="bulkSizesInput"
+                class="input h-8 text-xs flex-1"
+                placeholder="Вставить списком через запятую (например: 122, 128, 134, 140)..."
+                @keyup.enter.prevent="applyBulkSizes"
+              />
+              <button
+                type="button"
+                class="btn-muted h-8 px-3 text-xs font-semibold shrink-0"
+                @click="applyBulkSizes"
+              >
+                Добавить список
+              </button>
             </div>
           </div>
           <div class="space-y-2">
@@ -529,6 +593,40 @@ function quickAddSizesPrompt() {
   const size = window.prompt('Новый размер (S, M, L…)', '')
   if (!size?.trim()) return
   form.variants.push({ ...blankVariant(), size: size.trim(), stock_store: 0 })
+}
+
+const schoolSizes = ['116', '122', '128', '134', '140', '146', '152', '158', '164']
+const letterSizes = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL']
+const toddlerSizes = ['86', '92', '98', '104', '110']
+const bulkSizesInput = ref('')
+
+function isSizeAlreadyAdded(sz) {
+  const clean = String(sz || '').trim().toLowerCase()
+  return (form.variants || []).some((v) => (v.size || '').trim().toLowerCase() === clean)
+}
+
+function addSingleSize(sz) {
+  const clean = String(sz || '').trim()
+  if (!clean) return
+  if (isSizeAlreadyAdded(clean)) return
+  if (form.variants.length === 1 && !form.variants[0].size && !form.variants[0].id) {
+    form.variants[0].size = clean
+  } else {
+    form.variants.push({ ...blankVariant(), size: clean })
+  }
+}
+
+function addPresetSizes(sizesArray) {
+  for (const s of sizesArray) {
+    addSingleSize(s)
+  }
+}
+
+function applyBulkSizes() {
+  if (!bulkSizesInput.value.trim()) return
+  const parts = bulkSizesInput.value.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean)
+  addPresetSizes(parts)
+  bulkSizesInput.value = ''
 }
 
 function photoUrl(path) {

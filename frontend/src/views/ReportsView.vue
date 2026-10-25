@@ -621,6 +621,17 @@
           >
             <span>По категориям ({{ filteredCategories.length }})</span>
           </button>
+
+          <!-- Вкладка 4: По сменам и сотрудникам -->
+          <button
+            type="button"
+            class="flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-bold transition"
+            :class="activeTab === 'cashiers' ? 'bg-emerald-600 text-white shadow-emerald-600/30' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'"
+            @click="activeTab = 'cashiers'"
+          >
+            <UserCheck class="h-4 w-4" />
+            <span>По сменам и сотрудникам ({{ filteredCashiers.length }})</span>
+          </button>
         </div>
 
         <!-- Управление отображением: сортировка и раскрытие -->
@@ -1016,6 +1027,72 @@
           </table>
         </div>
       </div>
+
+      <!-- ======================================================== -->
+      <!-- ВКЛАДКА 4: ПО СМЕНАМ И СОТРУДНИКАМ                       -->
+      <!-- ======================================================== -->
+      <div v-else-if="activeTab === 'cashiers'">
+        <EmptyState
+          v-if="!filteredCashiers.length"
+          class="m-6"
+          title="Смены и сотрудники не найдены"
+          text="За выбранный период данных по продажам сотрудников не найдено."
+        />
+
+        <div v-else class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
+              <tr>
+                <th class="px-4 py-3">Сотрудник / Кассир</th>
+                <th class="px-4 py-3 text-right">Чеков</th>
+                <th class="px-4 py-3 text-right">Продано шт.</th>
+                <th class="px-4 py-3 text-right">✓ Из наличия</th>
+                <th class="px-4 py-3 text-right">📦 Под заказ</th>
+                <th class="px-4 py-3 text-right">Выручка (₸)</th>
+                <th class="px-4 py-3 text-right">Средний чек</th>
+                <th class="px-4 py-3 text-right">Доля в выручке</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 dark:divide-slate-800/60">
+              <tr
+                v-for="cashier in sortedCashiers"
+                :key="cashier.cashier_id || cashier.cashier_name"
+                class="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition"
+              >
+                <td class="px-4 py-3 font-bold text-slate-900 dark:text-white">
+                  <div class="flex items-center gap-2">
+                    <div class="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-xs font-black text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                      {{ cashier.cashier_name ? cashier.cashier_name.charAt(0).toUpperCase() : 'К' }}
+                    </div>
+                    <span>{{ cashier.cashier_name }}</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3 text-right font-semibold tabular-nums text-slate-800 dark:text-slate-200">
+                  {{ cashier.sales_count }}
+                </td>
+                <td class="px-4 py-3 text-right font-black tabular-nums text-slate-900 dark:text-white">
+                  {{ cashier.sold_quantity }} шт.
+                </td>
+                <td class="px-4 py-3 text-right tabular-nums text-emerald-700 dark:text-emerald-400 font-semibold">
+                  {{ cashier.in_stock_sold }} шт.
+                </td>
+                <td class="px-4 py-3 text-right tabular-nums text-amber-700 dark:text-amber-400 font-semibold">
+                  {{ cashier.on_order_sold }} шт.
+                </td>
+                <td class="px-4 py-3 text-right font-black tabular-nums text-slate-900 dark:text-white">
+                  {{ formatMoney(cashier.revenue) }}
+                </td>
+                <td class="px-4 py-3 text-right tabular-nums text-slate-500 font-medium">
+                  {{ formatMoney(cashier.average_check) }}
+                </td>
+                <td class="px-4 py-3 text-right font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                  {{ cashier.revenue_percent }}%
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
   </div>
 </template>
@@ -1034,6 +1111,7 @@ import {
   Search,
   ShoppingBag,
   Sparkles,
+  UserCheck,
   X,
 } from 'lucide-vue-next'
 import api, { apiError } from '../api/client'
@@ -1048,7 +1126,7 @@ const loading = ref(false)
 const exportingExcel = ref(false)
 const showMoreActions = ref(false)
 
-const activeTab = ref('types') // 'types' | 'products' | 'categories'
+const activeTab = ref('types') // 'types' | 'products' | 'categories' | 'cashiers'
 const activePeriod = ref('month') // 'all' | 'today' | '7days' | 'month' | 'custom'
 const orderTypeFilter = ref('') // '' (все) | 'in_stock' | 'on_order'
 const categoryFilter = ref(null) // ID категории или null
@@ -1080,6 +1158,7 @@ const analyticsData = ref({
   by_type: [],
   by_category: [],
   by_product: [],
+  by_cashier: [],
 })
 
 const periodPresets = [
@@ -1097,6 +1176,7 @@ const topSizes = computed(() => analyticsData.value?.top_sizes || [])
 const byType = computed(() => analyticsData.value?.by_type || [])
 const byCategory = computed(() => analyticsData.value?.by_category || [])
 const byProduct = computed(() => analyticsData.value?.by_product || [])
+const byCashier = computed(() => analyticsData.value?.by_cashier || [])
 
 const availableTypes = computed(() => {
   const serverTypes = analyticsData.value?.available_types || []
@@ -1245,6 +1325,31 @@ const sortedCategories = computed(() => {
     }
     if (field === 'name') {
       return (a.category_name || '').localeCompare(b.category_name || '') * dir
+    }
+    return 0
+  })
+})
+
+const filteredCashiers = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return byCashier.value
+  return byCashier.value.filter((item) => (item.cashier_name || '').toLowerCase().includes(q))
+})
+
+const sortedCashiers = computed(() => {
+  const list = [...filteredCashiers.value]
+  const field = sortField.value
+  const dir = sortDirection.value === 'asc' ? 1 : -1
+
+  return list.sort((a, b) => {
+    if (field === 'sold_quantity') {
+      return (Number(a.sold_quantity || 0) - Number(b.sold_quantity || 0)) * dir
+    }
+    if (field === 'revenue') {
+      return (Number(a.revenue || 0) - Number(b.revenue || 0)) * dir
+    }
+    if (field === 'name') {
+      return (a.cashier_name || '').localeCompare(b.cashier_name || '') * dir
     }
     return 0
   })

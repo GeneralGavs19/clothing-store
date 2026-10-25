@@ -76,8 +76,28 @@ class ProductController extends Controller
 
     public function store(Request $request, ActivityLogger $logger)
     {
-        $product = DB::transaction(function () use ($request) {
-            $payload = $this->validatedProductAndVariants($request);
+        $payload = $this->validatedProductAndVariants($request);
+
+        $name = trim($payload['name'] ?? '');
+        $color = trim($payload['color'] ?? '');
+        $catId = $payload['category_id'] ?? null;
+
+        $existingQuery = Product::query()->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower($name)]);
+        if ($catId) {
+            $existingQuery->where('category_id', $catId);
+        }
+        if ($color !== '') {
+            $existingQuery->whereRaw('LOWER(TRIM(COALESCE(color, ""))) = ?', [mb_strtolower($color)]);
+        }
+        $existing = $existingQuery->first();
+
+        if ($existing) {
+            throw ValidationException::withMessages([
+                'name' => "Товар с названием «{$existing->name}» уже существует в каталоге (ID: {$existing->id}). Добавьте нужные размеры в существующую модель, чтобы не создавать дубликаты.",
+            ]);
+        }
+
+        $product = DB::transaction(function () use ($request, $payload) {
             $variantRows = $payload['variants'];
             unset($payload['variants']);
 
@@ -347,8 +367,19 @@ class ProductController extends Controller
 
         if (isset($data['variants'])) {
             $normalized = [];
+            $seenSizes = [];
             foreach ($data['variants'] as $row) {
                 $row = $this->camelToSnakeVariantRow(is_array($row) ? $row : []);
+                $sizeKey = mb_strtolower(trim((string) ($row['size'] ?? '')));
+                if ($sizeKey !== '') {
+                    if (isset($seenSizes[$sizeKey])) {
+                        $idx = $seenSizes[$sizeKey];
+                        $normalized[$idx]['stock_store'] = ((int) ($normalized[$idx]['stock_store'] ?? 0)) + ((int) ($row['stock_store'] ?? 0));
+                        $normalized[$idx]['stock_warehouse'] = ((int) ($normalized[$idx]['stock_warehouse'] ?? 0)) + ((int) ($row['stock_warehouse'] ?? 0));
+                        continue;
+                    }
+                    $seenSizes[$sizeKey] = count($normalized);
+                }
                 $normalized[] = $row;
             }
             $data['variants'] = $normalized;
