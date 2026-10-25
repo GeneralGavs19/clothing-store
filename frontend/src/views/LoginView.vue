@@ -21,7 +21,7 @@
         </div>
       </div>
 
-      <form class="p-6 sm:p-8" @submit.prevent="submit">
+      <form class="p-6 sm:p-8" autocomplete="off" @submit.prevent="submit">
         <div class="mb-8 md:hidden">
           <div class="text-xl font-semibold text-slate-950 dark:text-white">Durability Store</div>
           <div class="text-sm text-slate-500 dark:text-slate-400">Учет товаров и продаж</div>
@@ -34,11 +34,11 @@
         <div class="mt-8 space-y-4">
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Email</span>
-            <input v-model="form.email" class="input" type="email" autocomplete="email" required />
+            <input v-model="form.email" class="input" type="email" autocomplete="off" required />
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Пароль</span>
-            <input v-model="form.password" class="input" type="password" autocomplete="current-password" required />
+            <input v-model="form.password" class="input" type="password" autocomplete="new-password" required />
           </label>
         </div>
 
@@ -46,16 +46,6 @@
           <LoaderCircle v-if="auth.loading" class="h-4 w-4 animate-spin" />
           Войти
         </button>
-
-        <div class="mt-4 flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-          <div>
-            <span class="font-semibold text-slate-800 dark:text-slate-200">Администратор:</span><br />
-            admin@store.local &bull; ChangeMe123!
-          </div>
-          <button type="button" class="ml-2 shrink-0 rounded bg-emerald-600 px-2.5 py-1.5 font-medium text-white hover:bg-emerald-500 transition-colors" @click="fillAdmin">
-            Заполнить
-          </button>
-        </div>
       </form>
     </section>
   </main>
@@ -91,11 +81,6 @@ const toast = useToastStore()
 const route = useRoute()
 const router = useRouter()
 const form = reactive({ email: '', password: '' })
-
-function fillAdmin() {
-  form.email = 'admin@store.local'
-  form.password = 'ChangeMe123!'
-}
 
 async function submit() {
   form.email = form.email.trim().toLowerCase()
