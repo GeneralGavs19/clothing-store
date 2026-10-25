@@ -358,6 +358,176 @@ class SalesService
         });
     }
 
+    public function updateSale(Sale $sale, array $data, User $actor): Sale
+    {
+        return DB::transaction(function () use ($sale, $data, $actor) {
+            $sale = Sale::query()->with(['items'])->lockForUpdate()->findOrFail($sale->id);
+
+            // 1. If sale was approved, revert old items' stock effects and daily stats
+            if ($sale->status === 'approved') {
+                $itemIds = $sale->items->pluck('product_item_id')->filter()->unique()->values();
+                $productItems = ProductItem::query()->whereIn('id', $itemIds)->lockForUpdate()->get()->keyBy('id');
+
+                $variantIds = $sale->items->pluck('product_variant_id')->filter()->unique()->values();
+                $variants = ProductVariant::query()
+                    ->whereIn('id', $variantIds->merge($productItems->pluck('product_variant_id'))->unique())
+                    ->lockForUpdate()
+                    ->get()
+                    ->keyBy('id');
+
+                $products = Product::query()
+                    ->whereIn('id', $variants->pluck('product_id')->unique())
+                    ->lockForUpdate()
+                    ->get()
+                    ->keyBy('id');
+
+                foreach ($sale->items as $oldItem) {
+                    if ($oldItem->product_item_id) {
+                        $pi = $productItems->get((int) $oldItem->product_item_id);
+                        if ($pi) {
+                            $location = ($oldItem->source_location ?? 'display') === 'stock'
+                                ? ProductItem::LOCATION_STOCK
+                                : ProductItem::LOCATION_DISPLAY;
+                            $this->itemService->restoreSold($pi, $location);
+                            $var = $variants->get((int) $pi->product_variant_id);
+                            if ($var) {
+                                $var->refresh();
+                                $prod = $products->get((int) $var->product_id);
+                                if ($prod) {
+                                    $prod->applyAggregatesFromVariants();
+                                    $prod->save();
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
+                    $var = $variants->get((int) $oldItem->product_variant_id);
+                    if ($var) {
+                        $source = $oldItem->source_location ?? 'display';
+                        $this->restoreVariantSale($var, (int) $oldItem->quantity, $source);
+                        $var->save();
+
+                        $prod = $products->get((int) $var->product_id);
+                        if ($prod) {
+                            $prod->applyAggregatesFromVariants();
+                            $prod->save();
+                        }
+                    }
+                }
+
+                $this->reverseDailyStats($sale);
+                StockMovement::query()->where('sale_id', $sale->id)->delete();
+            }
+
+            // 2. Prepare new sale attributes
+            $isOnOrder = array_key_exists('is_on_order', $data) ? (bool) $data['is_on_order'] : (bool) $sale->is_on_order;
+            $cashierNote = array_key_exists('cashier_note', $data) ? (isset($data['cashier_note']) ? strip_tags($data['cashier_note']) : null) : $sale->cashier_note;
+            $soldAt = $sale->approved_at ?? $sale->created_at ?? now();
+
+            // 3. Delete old items and insert updated items
+            $sale->items()->delete();
+
+            $subtotal = 0.0;
+            $profit = 0.0;
+            $totalQty = 0;
+
+            $itemsData = $data['items'] ?? [];
+            foreach ($itemsData as $row) {
+                $qty = max(1, (int) ($row['quantity'] ?? 1));
+                $source = ($row['source'] ?? 'display') === 'stock' ? 'stock' : 'display';
+
+                // Resolve product and variant
+                $variant = null;
+                $product = null;
+
+                if (! empty($row['product_variant_id'])) {
+                    $variant = ProductVariant::query()->lockForUpdate()->find((int) $row['product_variant_id']);
+                }
+
+                if (! empty($row['product_id'])) {
+                    $product = Product::query()->lockForUpdate()->find((int) $row['product_id']);
+                }
+
+                if ($variant && ! $product) {
+                    $product = Product::query()->lockForUpdate()->find($variant->product_id);
+                }
+
+                if ($product && ! $variant && ! empty($row['variant_size'])) {
+                    $size = trim($row['variant_size']);
+                    $variant = $product->variants()->where('size', $size)->lockForUpdate()->first();
+                    if (! $variant) {
+                        $variant = $product->variants()->create([
+                            'size' => $size,
+                            'sale_price' => isset($row['sale_price']) ? (float) $row['sale_price'] : (float) $product->sale_price,
+                            'purchase_price' => (float) ($product->purchase_price ?? 0),
+                            'stock_store' => 0,
+                            'stock_warehouse' => 0,
+                            'low_stock_threshold' => 0,
+                            'position' => (int) $product->variants()->count(),
+                        ]);
+                    }
+                }
+
+                $productName = ! empty($row['product_name']) ? trim($row['product_name']) : ($product?->name ?? 'Товар');
+                $productType = ! empty($row['product_type']) ? trim($row['product_type']) : ($product?->type ?? null);
+                $variantSize = ! empty($row['variant_size']) ? trim($row['variant_size']) : ($variant?->size ?? '—');
+                $salePrice = isset($row['sale_price']) && is_numeric($row['sale_price'])
+                    ? (float) $row['sale_price']
+                    : (float) ($variant?->sale_price ?? $product?->sale_price ?? 0);
+                $purchasePrice = (float) ($variant?->purchase_price ?? $product?->purchase_price ?? 0);
+
+                $lineTotal = round($salePrice * $qty, 2);
+                $lineProfit = round(($salePrice - $purchasePrice) * $qty, 2);
+
+                $sale->items()->create([
+                    'product_id' => $product?->id,
+                    'product_variant_id' => $variant?->id,
+                    'product_name' => $productName,
+                    'product_type' => $productType,
+                    'product_sku' => $variant?->sku,
+                    'quantity' => $qty,
+                    'is_on_order' => $isOnOrder,
+                    'source_location' => $source,
+                    'variant_size' => $variantSize,
+                    'purchase_price' => $purchasePrice,
+                    'sale_price' => $salePrice,
+                    'line_total' => $lineTotal,
+                    'line_profit' => $lineProfit,
+                ]);
+
+                if ($sale->status === 'approved' && $variant) {
+                    $this->sellVariantQuantity($variant, $qty, $source);
+                    $variant->save();
+
+                    if ($product) {
+                        $product->applyAggregatesFromVariants();
+                        $product->save();
+                        $this->recordStockMovement($sale, $actor, $product, -1 * $qty, 'Редактирование продажи №'.$sale->id);
+                    }
+                }
+
+                $subtotal += $lineTotal;
+                $profit += $lineProfit;
+                $totalQty += $qty;
+            }
+
+            $sale->update([
+                'number' => $this->humanNumber($sale->id, $soldAt, $totalQty, $subtotal),
+                'subtotal' => $subtotal,
+                'profit' => $profit,
+                'is_on_order' => $isOnOrder,
+                'cashier_note' => $cashierNote,
+            ]);
+
+            if ($sale->status === 'approved') {
+                $this->recordDailyStats($sale->fresh(['items']), $soldAt);
+            }
+
+            return $sale->fresh(['items.product.category', 'cashier', 'approver']);
+        });
+    }
+
     private function humanNumber(int $id, $soldAt, int $totalQty, float $subtotal): string
     {
         $date = $soldAt->format('d.m.Y H:i');

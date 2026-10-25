@@ -151,6 +151,32 @@ class SaleController extends Controller
         return response()->json($sale);
     }
 
+    public function update(Request $request, Sale $sale, SalesService $sales, ActivityLogger $logger)
+    {
+        $data = $request->validate([
+            'is_on_order' => ['nullable', 'boolean'],
+            'cashier_note' => ['nullable', 'string', 'max:1000'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.product_id' => ['nullable', 'exists:products,id'],
+            'items.*.product_variant_id' => ['nullable', 'exists:product_variants,id'],
+            'items.*.product_name' => ['nullable', 'string', 'max:180'],
+            'items.*.product_type' => ['nullable', 'string', 'max:100'],
+            'items.*.variant_size' => ['required', 'string', 'max:64'],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.sale_price' => ['required', 'numeric', 'min:0'],
+            'items.*.source' => ['nullable', 'in:display,stock'],
+        ]);
+
+        $updatedSale = $sales->updateSale($sale, $data, $request->user());
+
+        $logger->log('sales.updated', $updatedSale, [
+            'number' => $updatedSale->number,
+            'subtotal' => (float) $updatedSale->subtotal,
+        ], $request);
+
+        return response()->json($updatedSale);
+    }
+
     public function destroy(Request $request, Sale $sale, SalesService $sales, ActivityLogger $logger)
     {
         $sale->load(['items', 'cashier']);

@@ -275,14 +275,16 @@ class ReportController extends Controller
             'Размер',
             'Цвет',
             'Цена продажи, ₸',
-            'Общее количество проданных (шт.)',
-            'Общая цена продажи (Выручка), ₸',
+            'Продано всего (шт.)',
+            '✓ Из наличия (шт.)',
+            '📦 На заказ (шт.)',
+            'Общая выручка, ₸',
             'Текущий остаток (шт.)',
             'Было учтено (Продано + Остаток)',
         ];
         $sheet2->fromArray($headers2, null, 'A4');
         $sheet2->getRowDimension(4)->setRowHeight(24);
-        $sheet2->getStyle('A4:J4')->applyFromArray([
+        $sheet2->getStyle('A4:L4')->applyFromArray([
             'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 10],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '0284C7']], // Синий оттенок для второй вкладки
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER, 'wrapText' => true],
@@ -293,6 +295,7 @@ class ReportController extends Controller
             if ($sale->status === 'rejected') {
                 continue;
             }
+            $isOnOrder = (bool) $sale->is_on_order;
             foreach ($sale->items as $item) {
                 $pName = $item->product_name ?: $item->product?->name ?: 'Товар';
                 $pType = $item->product_type ?: $item->product?->type ?: '—';
@@ -314,13 +317,21 @@ class ReportController extends Controller
                         'color' => $pColor,
                         'sale_price' => (float) $item->sale_price,
                         'sold_quantity' => 0,
+                        'in_stock_qty' => 0,
+                        'on_order_qty' => 0,
                         'total_revenue' => 0.0,
                         'current_stock' => $currentStock,
                     ];
                 }
 
-                $productsAggregated[$key]['sold_quantity'] += (int) $item->quantity;
+                $qty = (int) $item->quantity;
+                $productsAggregated[$key]['sold_quantity'] += $qty;
                 $productsAggregated[$key]['total_revenue'] += (float) $item->line_total;
+                if ($isOnOrder) {
+                    $productsAggregated[$key]['on_order_qty'] += $qty;
+                } else {
+                    $productsAggregated[$key]['in_stock_qty'] += $qty;
+                }
             }
         }
 
@@ -335,6 +346,8 @@ class ReportController extends Controller
                 $row['color'],
                 $row['sale_price'],
                 $row['sold_quantity'],
+                $row['in_stock_qty'],
+                $row['on_order_qty'],
                 $row['total_revenue'],
                 $row['current_stock'],
                 $initial,
@@ -351,8 +364,10 @@ class ReportController extends Controller
         $sheet2->setCellValue("H{$totalRow2}", "=SUM(H5:H{$end2})");
         $sheet2->setCellValue("I{$totalRow2}", "=SUM(I5:I{$end2})");
         $sheet2->setCellValue("J{$totalRow2}", "=SUM(J5:J{$end2})");
+        $sheet2->setCellValue("K{$totalRow2}", "=SUM(K5:K{$end2})");
+        $sheet2->setCellValue("L{$totalRow2}", "=SUM(L5:L{$end2})");
 
-        $sheet2->getStyle("A{$totalRow2}:J{$totalRow2}")->applyFromArray([
+        $sheet2->getStyle("A{$totalRow2}:L{$totalRow2}")->applyFromArray([
             'font' => ['bold' => true, 'size' => 11, 'color' => ['rgb' => '000000']],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E2E8F0']],
             'borders' => [
@@ -362,14 +377,14 @@ class ReportController extends Controller
         ]);
         $sheet2->getStyle("A{$totalRow2}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
 
-        $sheet2->getStyle("A5:J{$end2}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('E2E8F0');
+        $sheet2->getStyle("A5:L{$end2}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('E2E8F0');
         $sheet2->getStyle("D5:E{$end2}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet2->getStyle("G5:G{$totalRow2}")->getNumberFormat()->setFormatCode('#,##0');
+        $sheet2->getStyle("G5:I{$totalRow2}")->getNumberFormat()->setFormatCode('#,##0');
         $sheet2->getStyle("F5:F{$end2}")->getNumberFormat()->setFormatCode('#,##0 "₸"');
-        $sheet2->getStyle("H5:H{$totalRow2}")->getNumberFormat()->setFormatCode('#,##0 "₸"');
-        $sheet2->getStyle("I5:J{$totalRow2}")->getNumberFormat()->setFormatCode('#,##0');
+        $sheet2->getStyle("J5:J{$totalRow2}")->getNumberFormat()->setFormatCode('#,##0 "₸"');
+        $sheet2->getStyle("K5:L{$totalRow2}")->getNumberFormat()->setFormatCode('#,##0');
 
-        foreach (range('A', 'J') as $col) {
+        foreach (range('A', 'L') as $col) {
             $sheet2->getColumnDimension($col)->setAutoSize(true);
         }
 
@@ -598,7 +613,7 @@ class ReportController extends Controller
         $salesByProduct = $saleItems->groupBy(fn ($item) => (int) ($item->product_id ?: 0));
         $salesByVariant = $saleItems->groupBy(fn ($item) => (int) ($item->product_variant_id ?: 0));
 
-        // 1. BY TYPE
+        // 1. BY TYPE WITH SIZES BREAKDOWN (В наличии / На заказ)
         $typesMap = [];
         foreach ($catalogProducts as $prod) {
             $t = trim((string) ($prod->type ?: $prod->category?->name ?: 'Без вида'));
@@ -606,36 +621,117 @@ class ReportController extends Controller
                 $typesMap[$t] = [
                     'type' => $t,
                     'sold_quantity' => 0,
+                    'in_stock_sold' => 0,
+                    'on_order_sold' => 0,
                     'stock_quantity' => 0,
                     'revenue' => 0.0,
+                    'in_stock_revenue' => 0.0,
+                    'on_order_revenue' => 0.0,
                     'profit' => 0.0,
+                    'sizes_map' => [],
                 ];
             }
             $typesMap[$t]['stock_quantity'] += (int) $prod->total_quantity;
+
+            foreach ($prod->variants as $variant) {
+                $sz = trim((string) ($variant->size ?: '—'));
+                if (! isset($typesMap[$t]['sizes_map'][$sz])) {
+                    $typesMap[$t]['sizes_map'][$sz] = [
+                        'size' => $sz,
+                        'sold_quantity' => 0,
+                        'in_stock_sold' => 0,
+                        'on_order_sold' => 0,
+                        'stock_quantity' => 0,
+                        'revenue' => 0.0,
+                        'in_stock_revenue' => 0.0,
+                        'on_order_revenue' => 0.0,
+                        'profit' => 0.0,
+                    ];
+                }
+                $typesMap[$t]['sizes_map'][$sz]['stock_quantity'] += (int) $variant->stockTotal();
+            }
         }
 
         foreach ($saleItems as $item) {
             $t = trim((string) ($item->product_type ?: $item->live_product_type ?: $item->live_category_name ?: 'Без вида'));
+            $sz = trim((string) ($item->variant_size ?: '—'));
+            $qty = (int) $item->quantity;
+            $lineTotal = (float) $item->line_total;
+            $lineProfit = (float) $item->line_profit;
+            $isOnOrder = (bool) $item->sale_is_on_order;
+
             if (! isset($typesMap[$t])) {
                 $typesMap[$t] = [
                     'type' => $t,
                     'sold_quantity' => 0,
+                    'in_stock_sold' => 0,
+                    'on_order_sold' => 0,
                     'stock_quantity' => 0,
                     'revenue' => 0.0,
+                    'in_stock_revenue' => 0.0,
+                    'on_order_revenue' => 0.0,
+                    'profit' => 0.0,
+                    'sizes_map' => [],
+                ];
+            }
+
+            if (! isset($typesMap[$t]['sizes_map'][$sz])) {
+                $typesMap[$t]['sizes_map'][$sz] = [
+                    'size' => $sz,
+                    'sold_quantity' => 0,
+                    'in_stock_sold' => 0,
+                    'on_order_sold' => 0,
+                    'stock_quantity' => 0,
+                    'revenue' => 0.0,
+                    'in_stock_revenue' => 0.0,
+                    'on_order_revenue' => 0.0,
                     'profit' => 0.0,
                 ];
             }
-            $typesMap[$t]['sold_quantity'] += (int) $item->quantity;
-            $typesMap[$t]['revenue'] += (float) $item->line_total;
-            $typesMap[$t]['profit'] += (float) $item->line_profit;
+
+            $typesMap[$t]['sold_quantity'] += $qty;
+            $typesMap[$t]['revenue'] += $lineTotal;
+            $typesMap[$t]['profit'] += $lineProfit;
+
+            $typesMap[$t]['sizes_map'][$sz]['sold_quantity'] += $qty;
+            $typesMap[$t]['sizes_map'][$sz]['revenue'] += $lineTotal;
+            $typesMap[$t]['sizes_map'][$sz]['profit'] += $lineProfit;
+
+            if ($isOnOrder) {
+                $typesMap[$t]['on_order_sold'] += $qty;
+                $typesMap[$t]['on_order_revenue'] += $lineTotal;
+                $typesMap[$t]['sizes_map'][$sz]['on_order_sold'] += $qty;
+                $typesMap[$t]['sizes_map'][$sz]['on_order_revenue'] += $lineTotal;
+            } else {
+                $typesMap[$t]['in_stock_sold'] += $qty;
+                $typesMap[$t]['in_stock_revenue'] += $lineTotal;
+                $typesMap[$t]['sizes_map'][$sz]['in_stock_sold'] += $qty;
+                $typesMap[$t]['sizes_map'][$sz]['in_stock_revenue'] += $lineTotal;
+            }
         }
 
         $byType = collect($typesMap)->map(function ($item) use ($totalRevenue, $totalSoldUnits) {
             $item['initial_quantity'] = (int) $item['sold_quantity'] + (int) $item['stock_quantity'];
             $item['revenue'] = round((float) $item['revenue'], 2);
+            $item['in_stock_revenue'] = round((float) $item['in_stock_revenue'], 2);
+            $item['on_order_revenue'] = round((float) $item['on_order_revenue'], 2);
             $item['profit'] = round((float) $item['profit'], 2);
             $item['revenue_percent'] = $totalRevenue > 0 ? round(($item['revenue'] / $totalRevenue) * 100, 1) : 0;
             $item['units_percent'] = $totalSoldUnits > 0 ? round(($item['sold_quantity'] / $totalSoldUnits) * 100, 1) : 0;
+
+            $sizesList = collect($item['sizes_map'])->map(function ($s) {
+                $s['initial_quantity'] = (int) $s['sold_quantity'] + (int) $s['stock_quantity'];
+                $s['revenue'] = round((float) $s['revenue'], 2);
+                $s['in_stock_revenue'] = round((float) $s['in_stock_revenue'], 2);
+                $s['on_order_revenue'] = round((float) $s['on_order_revenue'], 2);
+                $s['profit'] = round((float) $s['profit'], 2);
+                $s['average_price'] = $s['sold_quantity'] > 0 ? round($s['revenue'] / $s['sold_quantity'], 2) : 0;
+
+                return $s;
+            })->values()->all();
+
+            unset($item['sizes_map']);
+            $item['sizes'] = $this->sortSizes($sizesList);
 
             return $item;
         })->sortByDesc('sold_quantity')->values()->all();
@@ -650,8 +746,12 @@ class ReportController extends Controller
                     'category_id' => $catId,
                     'category_name' => $catName,
                     'sold_quantity' => 0,
+                    'in_stock_sold' => 0,
+                    'on_order_sold' => 0,
                     'stock_quantity' => 0,
                     'revenue' => 0.0,
+                    'in_stock_revenue' => 0.0,
+                    'on_order_revenue' => 0.0,
                     'profit' => 0.0,
                 ];
             }
@@ -666,19 +766,38 @@ class ReportController extends Controller
                     'category_id' => $catId,
                     'category_name' => $catName,
                     'sold_quantity' => 0,
+                    'in_stock_sold' => 0,
+                    'on_order_sold' => 0,
                     'stock_quantity' => 0,
                     'revenue' => 0.0,
+                    'in_stock_revenue' => 0.0,
+                    'on_order_revenue' => 0.0,
                     'profit' => 0.0,
                 ];
             }
-            $categoriesMap[$catId]['sold_quantity'] += (int) $item->quantity;
-            $categoriesMap[$catId]['revenue'] += (float) $item->line_total;
-            $categoriesMap[$catId]['profit'] += (float) $item->line_profit;
+            $qty = (int) $item->quantity;
+            $lineTotal = (float) $item->line_total;
+            $lineProfit = (float) $item->line_profit;
+            $isOnOrder = (bool) $item->sale_is_on_order;
+
+            $categoriesMap[$catId]['sold_quantity'] += $qty;
+            $categoriesMap[$catId]['revenue'] += $lineTotal;
+            $categoriesMap[$catId]['profit'] += $lineProfit;
+
+            if ($isOnOrder) {
+                $categoriesMap[$catId]['on_order_sold'] += $qty;
+                $categoriesMap[$catId]['on_order_revenue'] += $lineTotal;
+            } else {
+                $categoriesMap[$catId]['in_stock_sold'] += $qty;
+                $categoriesMap[$catId]['in_stock_revenue'] += $lineTotal;
+            }
         }
 
         $byCategory = collect($categoriesMap)->map(function ($item) use ($totalRevenue, $totalSoldUnits) {
             $item['initial_quantity'] = (int) $item['sold_quantity'] + (int) $item['stock_quantity'];
             $item['revenue'] = round((float) $item['revenue'], 2);
+            $item['in_stock_revenue'] = round((float) $item['in_stock_revenue'], 2);
+            $item['on_order_revenue'] = round((float) $item['on_order_revenue'], 2);
             $item['profit'] = round((float) $item['profit'], 2);
             $item['revenue_percent'] = $totalRevenue > 0 ? round(($item['revenue'] / $totalRevenue) * 100, 1) : 0;
             $item['units_percent'] = $totalSoldUnits > 0 ? round(($item['sold_quantity'] / $totalSoldUnits) * 100, 1) : 0;
@@ -691,7 +810,12 @@ class ReportController extends Controller
         foreach ($catalogProducts as $prod) {
             $prodSales = $salesByProduct->get($prod->id, collect());
             $prodSoldQty = (int) $prodSales->sum('quantity');
+            $prodInStockSold = (int) $prodSales->filter(fn ($s) => ! (bool) $s->sale_is_on_order)->sum('quantity');
+            $prodOnOrderSold = (int) $prodSales->filter(fn ($s) => (bool) $s->sale_is_on_order)->sum('quantity');
+
             $prodRevenue = round((float) $prodSales->sum('line_total'), 2);
+            $prodInStockRev = round((float) $prodSales->filter(fn ($s) => ! (bool) $s->sale_is_on_order)->sum('line_total'), 2);
+            $prodOnOrderRev = round((float) $prodSales->filter(fn ($s) => (bool) $s->sale_is_on_order)->sum('line_total'), 2);
             $prodProfit = round((float) $prodSales->sum('line_profit'), 2);
             $prodStock = (int) $prod->total_quantity;
             $prodInitial = $prodSoldQty + $prodStock;
@@ -704,7 +828,12 @@ class ReportController extends Controller
                 }
 
                 $varSoldQty = (int) $varSales->sum('quantity');
+                $varInStockSold = (int) $varSales->filter(fn ($s) => ! (bool) $s->sale_is_on_order)->sum('quantity');
+                $varOnOrderSold = (int) $varSales->filter(fn ($s) => (bool) $s->sale_is_on_order)->sum('quantity');
+
                 $varRevenue = round((float) $varSales->sum('line_total'), 2);
+                $varInStockRev = round((float) $varSales->filter(fn ($s) => ! (bool) $s->sale_is_on_order)->sum('line_total'), 2);
+                $varOnOrderRev = round((float) $varSales->filter(fn ($s) => (bool) $s->sale_is_on_order)->sum('line_total'), 2);
                 $varProfit = round((float) $varSales->sum('line_profit'), 2);
                 $varStock = (int) $variant->stockTotal();
                 $varInitial = $varSoldQty + $varStock;
@@ -717,10 +846,14 @@ class ReportController extends Controller
                     'stock_warehouse' => (int) $variant->stock_warehouse,
                     'stock_quantity' => $varStock,
                     'sold_quantity' => $varSoldQty,
+                    'in_stock_sold' => $varInStockSold,
+                    'on_order_sold' => $varOnOrderSold,
                     'initial_quantity' => $varInitial,
                     'sale_price' => (float) $variant->sale_price,
                     'purchase_price' => (float) ($variant->purchase_price ?? $prod->purchase_price ?? 0),
                     'revenue' => $varRevenue,
+                    'in_stock_revenue' => $varInStockRev,
+                    'on_order_revenue' => $varOnOrderRev,
                     'profit' => $varProfit,
                 ];
             }
@@ -735,10 +868,14 @@ class ReportController extends Controller
                 'purchase_price' => (float) $prod->purchase_price,
                 'stock_quantity' => $prodStock,
                 'sold_quantity' => $prodSoldQty,
+                'in_stock_sold' => $prodInStockSold,
+                'on_order_sold' => $prodOnOrderSold,
                 'initial_quantity' => $prodInitial,
                 'revenue' => $prodRevenue,
+                'in_stock_revenue' => $prodInStockRev,
+                'on_order_revenue' => $prodOnOrderRev,
                 'profit' => $prodProfit,
-                'sizes' => $sizes,
+                'sizes' => $this->sortSizes($sizes),
             ];
         }
 
@@ -748,14 +885,25 @@ class ReportController extends Controller
             }
             $firstName = $items->first()->product_name ?: 'Товар #'.$prodId;
             $soldQty = (int) $items->sum('quantity');
+            $inStockSold = (int) $items->filter(fn ($s) => ! (bool) $s->sale_is_on_order)->sum('quantity');
+            $onOrderSold = (int) $items->filter(fn ($s) => (bool) $s->sale_is_on_order)->sum('quantity');
+
             $rev = round((float) $items->sum('line_total'), 2);
+            $inStockRev = round((float) $items->filter(fn ($s) => ! (bool) $s->sale_is_on_order)->sum('line_total'), 2);
+            $onOrderRev = round((float) $items->filter(fn ($s) => (bool) $s->sale_is_on_order)->sum('line_total'), 2);
             $prof = round((float) $items->sum('line_profit'), 2);
 
             $sizes = [];
             foreach ($items->groupBy('variant_size') as $sz => $szItems) {
                 $szSold = (int) $szItems->sum('quantity');
+                $szInStock = (int) $szItems->filter(fn ($s) => ! (bool) $s->sale_is_on_order)->sum('quantity');
+                $szOnOrder = (int) $szItems->filter(fn ($s) => (bool) $s->sale_is_on_order)->sum('quantity');
+
                 $szRev = round((float) $szItems->sum('line_total'), 2);
+                $szInStockRev = round((float) $szItems->filter(fn ($s) => ! (bool) $s->sale_is_on_order)->sum('line_total'), 2);
+                $szOnOrderRev = round((float) $szItems->filter(fn ($s) => (bool) $s->sale_is_on_order)->sum('line_total'), 2);
                 $szProf = round((float) $szItems->sum('line_profit'), 2);
+
                 $sizes[] = [
                     'variant_id' => null,
                     'size' => $sz ?: '—',
@@ -764,10 +912,14 @@ class ReportController extends Controller
                     'stock_warehouse' => 0,
                     'stock_quantity' => 0,
                     'sold_quantity' => $szSold,
+                    'in_stock_sold' => $szInStock,
+                    'on_order_sold' => $szOnOrder,
                     'initial_quantity' => $szSold,
                     'sale_price' => $szSold > 0 ? round($szRev / $szSold, 2) : 0,
                     'purchase_price' => 0,
                     'revenue' => $szRev,
+                    'in_stock_revenue' => $szInStockRev,
+                    'on_order_revenue' => $szOnOrderRev,
                     'profit' => $szProf,
                 ];
             }
@@ -782,10 +934,14 @@ class ReportController extends Controller
                 'purchase_price' => 0,
                 'stock_quantity' => 0,
                 'sold_quantity' => $soldQty,
+                'in_stock_sold' => $inStockSold,
+                'on_order_sold' => $onOrderSold,
                 'initial_quantity' => $soldQty,
                 'revenue' => $rev,
+                'in_stock_revenue' => $inStockRev,
+                'on_order_revenue' => $onOrderRev,
                 'profit' => $prof,
-                'sizes' => $sizes,
+                'sizes' => $this->sortSizes($sizes),
             ];
         }
 
@@ -819,5 +975,34 @@ class ReportController extends Controller
             ],
             'generated_at' => now()->toIso8601String(),
         ]);
+    }
+
+    private function sortSizes(array $sizes): array
+    {
+        $order = [
+            'xxs' => 1, 'xs' => 2, 's' => 3, 'm' => 4, 'l' => 5,
+            'xl' => 6, '2xl' => 7, 'xxl' => 7, '3xl' => 8, 'xxxl' => 8,
+            '4xl' => 9, '5xl' => 10, 'one size' => 99, 'универсальный' => 99,
+        ];
+
+        usort($sizes, function ($a, $b) use ($order) {
+            $sa = mb_strtolower(trim($a['size'] ?? ''));
+            $sb = mb_strtolower(trim($b['size'] ?? ''));
+
+            $oa = $order[$sa] ?? null;
+            $ob = $order[$sb] ?? null;
+
+            if ($oa !== null && $ob !== null) {
+                return $oa <=> $ob;
+            }
+
+            if (is_numeric($sa) && is_numeric($sb)) {
+                return (float) $sa <=> (float) $sb;
+            }
+
+            return strnatcasecmp($sa, $sb);
+        });
+
+        return $sizes;
     }
 }

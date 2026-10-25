@@ -46,5 +46,14 @@ export const useSalesStore = defineStore('sales', {
     async deleteSale(id) {
       return api.delete(`/sales/${id}`)
     },
+    async updateSale(id, payload) {
+      const res = await api.put(`/sales/${id}`, payload)
+      const updated = res.data
+      const idx = this.sales.findIndex((s) => s.id === id)
+      if (idx !== -1) {
+        this.sales[idx] = updated
+      }
+      return res
+    },
   },
 })

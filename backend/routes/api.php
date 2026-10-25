@@ -27,6 +27,7 @@ Route::middleware('jwt')->group(function () {
     Route::post('sales', [SaleController::class, 'store']);
     Route::post('sales/quick', [SaleController::class, 'quickSale']);
     Route::get('sales', [SaleController::class, 'index']);
+    Route::put('sales/{sale}', [SaleController::class, 'update']);
     Route::get('reports/sales.xlsx', [ReportController::class, 'salesExcel']);
 
     Route::middleware('role:admin,admin_programmer')->group(function () {
