@@ -136,6 +136,7 @@ import { useAuthStore } from '../stores/auth'
 import { useCatalogStore } from '../stores/catalog'
 import EmptyState from '../components/ui/EmptyState.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
+import { date, money } from '../utils/formatters'
 
 const props = defineProps({ id: { type: [String, Number], required: true } })
 
@@ -207,14 +208,6 @@ function locationLabel(loc) {
 function photoUrl(path) {
   if (!path) return ''
   return path.startsWith('http') ? path : `${apiBase.value}${path}`
-}
-
-function money(value) {
-  return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT', maximumFractionDigits: 0 }).format(Number(value || 0))
-}
-
-function date(value) {
-  return value ? new Date(value).toLocaleString('ru-RU') : '—'
 }
 
 function statusLabel(status) {

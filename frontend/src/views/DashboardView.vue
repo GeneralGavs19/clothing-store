@@ -199,6 +199,7 @@ import SalesDayChart from '../components/SalesDayChart.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
 import StatCard from '../components/StatCard.vue'
+import { money } from '../utils/formatters'
 
 const CircleDollarSign = createIcon(icons.CircleDollarSign)
 const ReceiptText = createIcon(icons.ReceiptText)
@@ -228,12 +229,6 @@ const todayHint = computed(() => {
 function photoUrl(path) {
   if (!path) return ''
   return path.startsWith('http') ? path : `${apiBase.value}${path}`
-}
-
-function money(value) {
-  return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT', maximumFractionDigits: 0 }).format(
-    Number(value || 0),
-  )
 }
 
 function percent(value, max) {

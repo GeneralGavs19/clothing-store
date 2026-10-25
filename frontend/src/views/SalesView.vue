@@ -1305,6 +1305,7 @@ import { useToastStore } from '../stores/toasts'
 import EmptyState from '../components/ui/EmptyState.vue'
 import PaginationBar from '../components/ui/PaginationBar.vue'
 import SkeletonBlock from '../components/ui/SkeletonBlock.vue'
+import { date, money } from '../utils/formatters'
 
 const auth = useAuthStore()
 const catalog = useCatalogStore()
@@ -1639,14 +1640,6 @@ function formatSaleNumber(sale) {
     return sale.number
   }
   return `Чек №${sale.id}`
-}
-
-function money(value) {
-  return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT', maximumFractionDigits: 0 }).format(Number(value || 0))
-}
-
-function date(value) {
-  return value ? new Date(value).toLocaleString('ru-RU') : '—'
 }
 
 async function downloadExcel() {
