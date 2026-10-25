@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Sale;
 use App\Services\ActivityLogger;
 use App\Services\SalesService;
+use App\Services\TelegramService;
 use App\Support\ApiPagination;
 use Illuminate\Http\Request;
 
@@ -62,7 +63,7 @@ class SaleController extends Controller
         return response()->json(ApiPagination::format($query->paginate($request->integer('per_page', 15))));
     }
 
-    public function store(Request $request, SalesService $sales, ActivityLogger $logger)
+    public function store(Request $request, SalesService $sales, ActivityLogger $logger, TelegramService $telegram)
     {
         $data = $request->validate([
             'items' => ['required', 'array', 'min:1'],
@@ -101,10 +102,14 @@ class SaleController extends Controller
 
         $logger->log('sales.created', $sale, ['number' => $sale->number], $request);
 
+        if ($sale->is_on_order) {
+            $telegram->notifyNewPreOrder($sale);
+        }
+
         return response()->json($sale, 201);
     }
 
-    public function quickSale(Request $request, SalesService $sales, ActivityLogger $logger)
+    public function quickSale(Request $request, SalesService $sales, ActivityLogger $logger, TelegramService $telegram)
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'max:180'],
@@ -130,6 +135,10 @@ class SaleController extends Controller
             'number' => $result['sale']->number,
             'product_name' => $result['product']->name,
         ], $request);
+
+        if (! empty($result['sale']->is_on_order)) {
+            $telegram->notifyNewPreOrder($result['sale']);
+        }
 
         return response()->json($result, 201);
     }
@@ -164,7 +173,7 @@ class SaleController extends Controller
         return response()->json($sale);
     }
 
-    public function cancel(Request $request, Sale $sale, SalesService $sales, ActivityLogger $logger)
+    public function cancel(Request $request, Sale $sale, SalesService $sales, ActivityLogger $logger, TelegramService $telegram)
     {
         $data = $request->validate([
             'cancel_reason' => ['nullable', 'string', 'max:500'],
@@ -193,6 +202,8 @@ class SaleController extends Controller
         $cancelledSale = $sales->cancelSale($sale, $request->user(), $data['cancel_reason'] ?? null);
 
         $logger->log('sales.cancelled', $cancelledSale, $metaBefore, $request);
+
+        $telegram->notifySaleCancelled($cancelledSale, $data['cancel_reason'] ?? null, $request->user());
 
         return response()->json($cancelledSale);
     }

@@ -16,6 +16,12 @@ class Kernel extends ConsoleKernel
     {
         // Run daily aggregation shortly after midnight
         $schedule->command('stats:aggregate-daily')->dailyAt('00:05');
+
+        // Ежевечерний отчет по смене кассы в Telegram (в 20:00)
+        $schedule->command('telegram:daily-report')->dailyAt('20:00');
+
+        // Ночной бэкап базы данных SQLite в Telegram (в 23:30)
+        $schedule->command('telegram:backup-db')->dailyAt('23:30');
     }
 
     protected function commands(): void
