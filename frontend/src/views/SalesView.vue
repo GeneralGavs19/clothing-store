@@ -100,10 +100,26 @@
                 ref="quickNameRef"
                 v-model="quickForm.name"
                 class="input mt-1"
-                placeholder="Например: Футболка Oversize Vintage"
+                placeholder="Например: Поло к/р, Брюки.спорт..."
                 required
                 autofocus
               />
+              <!-- Быстрые кнопки названий: Брюки.спорт, Поло к/р, Поло д/р, Бомбер, Худи -->
+              <div class="mt-1.5 flex flex-wrap gap-1 items-center">
+                <span class="text-[11px] text-slate-400 mr-0.5">Вставить:</span>
+                <button
+                  v-for="name in commonNames"
+                  :key="name"
+                  type="button"
+                  class="rounded border px-2 py-0.5 text-[11px] font-semibold transition"
+                  :class="quickForm.name === name
+                    ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-400 hover:text-emerald-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'"
+                  @click="setQuickName(name)"
+                >
+                  {{ name }}
+                </button>
+              </div>
             </div>
 
             <!-- Вид товара и Категория -->
@@ -124,10 +140,13 @@
                 <!-- Быстрые чипы видов -->
                 <div class="mt-1.5 flex flex-wrap gap-1">
                   <button
-                    v-for="t in popularTypes.slice(0, 6)"
+                    v-for="t in popularTypes"
                     :key="t"
                     type="button"
-                    class="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-emerald-100 hover:text-emerald-800 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-emerald-900/50"
+                    class="rounded border px-1.5 py-0.5 text-[11px] font-medium transition"
+                    :class="quickForm.type === t
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-800 font-bold dark:bg-emerald-950 dark:text-emerald-300'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-400 hover:text-emerald-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'"
                     @click="quickForm.type = t"
                   >
                     {{ t }}
@@ -168,7 +187,7 @@
                 <input
                   v-model="quickForm.size"
                   class="input mt-1"
-                  placeholder="S, M, L, XL, 42..."
+                  placeholder="128, 170, M, L..."
                   required
                 />
                 <!-- Быстрые чипы размеров -->
@@ -177,7 +196,10 @@
                     v-for="sz in commonSizes"
                     :key="sz"
                     type="button"
-                    class="rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:border-emerald-400 hover:text-emerald-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                    class="rounded border px-2 py-0.5 text-[11px] font-semibold transition"
+                    :class="quickForm.size === sz
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-800 font-bold dark:bg-emerald-950 dark:text-emerald-300'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-400 hover:text-emerald-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'"
                     @click="quickForm.size = sz"
                   >
                     {{ sz }}
@@ -192,8 +214,33 @@
                 <input
                   v-model="quickForm.color"
                   class="input mt-1"
-                  placeholder="Черный, Белый, Серый..."
+                  placeholder="Голубой, Синий, Черный..."
                 />
+                <!-- Быстрые кнопки цветов (Голубой, Синий...) -->
+                <div class="mt-1.5 flex flex-wrap gap-1 items-center">
+                  <span class="text-[11px] text-slate-400 mr-0.5">Цвет:</span>
+                  <button
+                    v-for="c in commonColors"
+                    :key="c"
+                    type="button"
+                    class="rounded border px-2 py-0.5 text-[11px] font-semibold transition"
+                    :class="quickForm.color === c
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-800 font-bold dark:bg-emerald-950 dark:text-emerald-300'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-400 hover:text-emerald-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'"
+                    @click="quickForm.color = c"
+                  >
+                    {{ c }}
+                  </button>
+                  <button
+                    v-if="quickForm.color"
+                    type="button"
+                    class="text-[11px] text-rose-500 hover:underline ml-1"
+                    title="Сбросить цвет"
+                    @click="quickForm.color = ''"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -244,20 +291,33 @@
               </div>
             </div>
 
-            <!-- Дата оформления продажи и срок готовности заказа (при обычном стоит сегодняшняя, но можно менять) -->
+            <!-- Дата оформления продажи и срок готовности заказа (фиксируется с прошлой продажи) -->
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Дата оформления чека <span class="text-rose-500">*</span>
-                </label>
+                <div class="flex items-center justify-between">
+                  <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Дата оформления чека <span class="text-rose-500">*</span>
+                  </label>
+                  <button
+                    v-if="quickForm.sold_at !== getTodayIsoDate()"
+                    type="button"
+                    class="text-[11px] font-semibold text-emerald-600 hover:underline dark:text-emerald-400 flex items-center gap-1"
+                    title="Сбросить на сегодняшнюю дату"
+                    @click="quickForm.sold_at = getTodayIsoDate()"
+                  >
+                    <Calendar class="h-3 w-3" />
+                    <span>Сегодня ({{ formatDate(getTodayIsoDate()) }})</span>
+                  </button>
+                </div>
                 <input
                   v-model="quickForm.sold_at"
                   type="date"
                   class="input mt-1 font-semibold text-xs"
                   required
                 />
-                <p class="mt-1 text-[11px] text-slate-500">
-                  По умолчанию сегодняшняя дата. Можно выбрать любую другую.
+                <p class="mt-1 text-[11px] text-slate-500 flex items-center gap-1">
+                  <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                  Фиксированная дата (сохраняется с прошлой добавленной продажи).
                 </p>
               </div>
 
@@ -505,19 +565,33 @@
             </div>
           </div>
 
-          <!-- Дата оформления чека и срок готовности (при обычном стоит сегодняшняя, но можно менять) -->
+          <!-- Дата оформления чека и срок готовности (фиксируется с прошлой продажи) -->
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Дата оформления чека <span class="text-rose-500">*</span>
-              </label>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Дата оформления чека <span class="text-rose-500">*</span>
+                </label>
+                <button
+                  v-if="saleDate !== getTodayIsoDate()"
+                  type="button"
+                  class="text-[11px] font-semibold text-emerald-600 hover:underline dark:text-emerald-400 flex items-center gap-1"
+                  title="Сбросить на сегодняшнюю дату"
+                  @click="saleDate = getTodayIsoDate()"
+                >
+                  <Calendar class="h-3 w-3" />
+                  <span>Сегодня ({{ formatDate(getTodayIsoDate()) }})</span>
+                </button>
+              </div>
               <input
                 v-model="saleDate"
                 type="date"
                 class="input text-xs font-semibold"
                 required
               />
-              <p class="mt-1 text-[10px] text-slate-400">По умолчанию сегодня. Можно выбрать другую дату.</p>
+              <p class="mt-1 text-[10px] text-slate-400">
+                🔒 Фиксированная дата с прошлой продажи. Не сбрасывается автоматически.
+              </p>
             </div>
 
             <div v-if="cartIsOnOrder">
@@ -1637,12 +1711,29 @@ const newItemVariants = ref([])
 
 const cart = ref([])
 const cartIsOnOrder = ref(false)
-const saleDate = ref(getTodayIsoDate())
+
+// Управление фиксированной датой продажи (сохраняется с прошлой добавленной продажи)
+const lastUsedSaleDate = ref(localStorage.getItem('clothing_store_last_sale_date') || getTodayIsoDate())
+
+function updateLastUsedDate(val) {
+  if (val) {
+    lastUsedSaleDate.value = val
+    try {
+      localStorage.setItem('clothing_store_last_sale_date', val)
+    } catch (e) {}
+  }
+}
+
+const saleDate = ref(lastUsedSaleDate.value || getTodayIsoDate())
 const saleDueDate = ref('')
 const cashierNote = ref('')
 const saving = ref(false)
 const quickSaving = ref(false)
 const quickCustomCategory = ref(false)
+
+watch(saleDate, (val) => {
+  if (val) updateLastUsedDate(val)
+})
 
 const cancelModalOpen = ref(false)
 const saleToCancel = ref(null)
@@ -1657,6 +1748,40 @@ let debounce
 let historyDebounce
 let timer
 
+// Быстрые названия товаров: Брюки.спорт, Поло к/р, Поло д/р, Бомбер, Худи
+const commonNames = [
+  'Брюки.спорт',
+  'Поло к/р',
+  'Поло д/р',
+  'Бомбер',
+  'Худи',
+]
+
+function setQuickName(name) {
+  quickForm.value.name = name
+  const lower = name.toLowerCase()
+  if (lower.includes('поло')) {
+    quickForm.value.type = 'Поло'
+  } else if (lower.includes('брюки')) {
+    quickForm.value.type = 'Брюки'
+  } else if (lower.includes('бомбер')) {
+    quickForm.value.type = 'Бомбер'
+  } else if (lower.includes('худи')) {
+    quickForm.value.type = 'Худи'
+  }
+}
+
+// Быстрые цвета: Голубой, Синий, Темно-синий, Белый, Черный, Серый
+const commonColors = [
+  'Голубой',
+  'Синий',
+  'Темно-синий',
+  'Белый',
+  'Черный',
+  'Серый',
+]
+
+// Виды товаров (существующие + формы)
 const popularTypes = [
   'Футболка',
   'Худи',
@@ -1664,19 +1789,22 @@ const popularTypes = [
   'Джинсы',
   'Штаны',
   'Шорты',
-  'Куртка',
-  'Рубашка',
   'Поло',
+  'Брюки',
+  'Бомбер',
+  'Рубашка',
+  'Куртка',
   'Платье',
   'Юбка',
   'Костюм',
-  'Обувь',
-  'Кроссовки',
-  'Кепка',
-  'Аксессуары',
 ]
 
-const commonSizes = ['116', '122', '128', '134', '140', '146', '152', '158', '164', 'XS', 'S', 'M', 'L']
+// Размеры: 116-164 + 170, 176, 182, 188, 194 + XS, S, M, L, XL, XXL
+const commonSizes = [
+  '116', '122', '128', '134', '140', '146', '152', '158', '164',
+  '170', '176', '182', '188', '194',
+  'XS', 'S', 'M', 'L', 'XL', 'XXL',
+]
 
 const quickForm = ref({
   name: '',
@@ -1687,11 +1815,15 @@ const quickForm = ref({
   color: '',
   sale_price: '',
   purchase_price: 0,
-  sold_at: getTodayIsoDate(),
+  sold_at: lastUsedSaleDate.value || getTodayIsoDate(),
   due_date: '',
   is_on_order: false,
   quantity: 1,
   cashier_note: '',
+})
+
+watch(() => quickForm.value.sold_at, (val) => {
+  if (val) updateLastUsedDate(val)
 })
 
 const apiBase = computed(() => resolveApiOrigin())
@@ -1840,10 +1972,13 @@ async function createSale() {
       is_on_order: Boolean(cartIsOnOrder.value),
       cashier_note: cashierNote.value ? cashierNote.value.trim() : null,
     })
+    const lastDate = saleDate.value || lastUsedSaleDate.value
+    updateLastUsedDate(lastDate)
+
     toast.push('Продажа успешно оформлена!')
     cart.value = []
     cartIsOnOrder.value = false
-    saleDate.value = getTodayIsoDate()
+    saleDate.value = lastDate
     saleDueDate.value = ''
     cashierNote.value = ''
     try {
@@ -1888,6 +2023,9 @@ async function submitQuickSale() {
 
     const lastType = quickForm.value.type
     const lastCatId = quickForm.value.category_id
+    const lastSoldAt = quickForm.value.sold_at || lastUsedSaleDate.value
+    updateLastUsedDate(lastSoldAt)
+
     quickForm.value = {
       name: '',
       type: lastType,
@@ -1897,7 +2035,7 @@ async function submitQuickSale() {
       color: '',
       sale_price: '',
       purchase_price: 0,
-      sold_at: getTodayIsoDate(),
+      sold_at: lastSoldAt,
       due_date: '',
       is_on_order: false,
       quantity: 1,
