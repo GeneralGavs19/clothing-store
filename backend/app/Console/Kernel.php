@@ -17,6 +17,12 @@ class Kernel extends ConsoleKernel
         // Run daily aggregation shortly after midnight
         $schedule->command('stats:aggregate-daily')->dailyAt('00:05');
 
+        // Утренний контроль заказов под пошив формы и дедлайнов (в 09:00)
+        $schedule->command('telegram:orders-report')->dailyAt('09:00');
+
+        // Диагностика работоспособности сайта и базы данных (в 12:00 и 18:00)
+        $schedule->command('telegram:health-check')->twiceDaily(12, 18);
+
         // Ежевечерний отчет по смене кассы в Telegram (в 20:00)
         $schedule->command('telegram:daily-report')->dailyAt('20:00');
 

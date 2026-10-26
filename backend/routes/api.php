@@ -9,10 +9,12 @@ use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SaleController;
 use App\Http\Controllers\Api\StockController;
+use App\Http\Controllers\Api\TelegramWebhookController;
 use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('health', HealthController::class);
+Route::post('telegram/webhook', TelegramWebhookController::class);
 Route::post('auth/login', [AuthController::class, 'login']);
 
 Route::middleware('jwt')->group(function () {
