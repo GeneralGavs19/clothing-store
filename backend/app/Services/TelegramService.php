@@ -26,7 +26,76 @@ class TelegramService
      */
     public function isConfigured(): bool
     {
-        return ! empty($this->token) && ! empty($this->adminChatId);
+        return ! empty($this->token);
+    }
+
+    /**
+     * Получить установленный мастер-пароль для входа в бота.
+     */
+    public function getBotPassword(): string
+    {
+        return (string) (config('services.telegram.bot_password')
+            ?: env('TELEGRAM_BOT_PASSWORD')
+            ?: env('ADMIN_PASSWORD', 'ChangeMe123!'));
+    }
+
+    /**
+     * Получить список всех авторизованных Chat ID (главный админ + вошедшие по паролю).
+     */
+    public function getAuthorizedChatIds(): array
+    {
+        $chats = [];
+        if (! empty($this->adminChatId)) {
+            $chats[] = (string) $this->adminChatId;
+        }
+
+        $filePath = storage_path('app/telegram_authorized_chats.json');
+        if (file_exists($filePath)) {
+            $data = json_decode((string) file_get_contents($filePath), true);
+            if (is_array($data)) {
+                foreach ($data as $id) {
+                    if (! empty($id)) {
+                        $chats[] = (string) $id;
+                    }
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($chats)));
+    }
+
+    /**
+     * Проверить, авторизован ли данный чат.
+     */
+    public function isChatAuthorized(string $chatId): bool
+    {
+        return in_array((string) $chatId, $this->getAuthorizedChatIds(), true);
+    }
+
+    /**
+     * Авторизовать чат после успешного ввода пароля.
+     */
+    public function authorizeChat(string $chatId): void
+    {
+        $chats = $this->getAuthorizedChatIds();
+        $chats[] = (string) $chatId;
+        $unique = array_values(array_unique(array_filter($chats)));
+
+        $dir = storage_path('app');
+        if (! is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+
+        file_put_contents(storage_path('app/telegram_authorized_chats.json'), json_encode($unique, JSON_PRETTY_PRINT));
+    }
+
+    /**
+     * Отозвать доступ у чата (команда /logout).
+     */
+    public function deauthorizeChat(string $chatId): void
+    {
+        $chats = array_diff($this->getAuthorizedChatIds(), [(string) $chatId]);
+        file_put_contents(storage_path('app/telegram_authorized_chats.json'), json_encode(array_values($chats), JSON_PRETTY_PRINT));
     }
 
     /**
@@ -56,6 +125,7 @@ class TelegramService
 
     /**
      * Отправка текстового сообщения.
+     * Если $chatId не указан, рассылается ВСЕМ авторизованным пользователям.
      */
     public function sendMessage(string $text, ?string $chatId = null, string $parseMode = 'HTML', ?array $replyMarkup = null): bool
     {
@@ -64,35 +134,41 @@ class TelegramService
             return false;
         }
 
-        $targetChat = $chatId ?: $this->adminChatId;
-
-        $payload = [
-            'chat_id' => $targetChat,
-            'text' => $text,
-            'parse_mode' => $parseMode,
-            'disable_web_page_preview' => true,
-        ];
-
-        if ($replyMarkup) {
-            $payload['reply_markup'] = $replyMarkup;
-        }
-
-        try {
-            $response = Http::timeout(10)->post("https://api.telegram.org/bot{$this->token}/sendMessage", $payload);
-
-            if (! $response->successful()) {
-                Log::warning('Telegram sendMessage failed', [
-                    'status' => $response->status(),
-                    'body' => $response->body(),
-                ]);
-                return false;
-            }
-
-            return true;
-        } catch (\Throwable $e) {
-            Log::error('Telegram sendMessage exception: ' . $e->getMessage());
+        $targets = $chatId ? [(string) $chatId] : $this->getAuthorizedChatIds();
+        if (empty($targets)) {
             return false;
         }
+
+        $allSuccess = true;
+        foreach ($targets as $targetChat) {
+            $payload = [
+                'chat_id' => $targetChat,
+                'text' => $text,
+                'parse_mode' => $parseMode,
+                'disable_web_page_preview' => true,
+            ];
+
+            if ($replyMarkup) {
+                $payload['reply_markup'] = $replyMarkup;
+            }
+
+            try {
+                $response = Http::timeout(10)->post("https://api.telegram.org/bot{$this->token}/sendMessage", $payload);
+
+                if (! $response->successful()) {
+                    Log::warning("Telegram sendMessage failed for chat {$targetChat}", [
+                        'status' => $response->status(),
+                        'body' => $response->body(),
+                    ]);
+                    $allSuccess = false;
+                }
+            } catch (\Throwable $e) {
+                Log::error("Telegram sendMessage exception for chat {$targetChat}: " . $e->getMessage());
+                $allSuccess = false;
+            }
+        }
+
+        return $allSuccess;
     }
 
     /**
@@ -104,22 +180,32 @@ class TelegramService
             return false;
         }
 
-        $targetChat = $chatId ?: $this->adminChatId;
-
-        try {
-            $response = Http::timeout(60)
-                ->attach('document', file_get_contents($filePath), basename($filePath))
-                ->post("https://api.telegram.org/bot{$this->token}/sendDocument", array_filter([
-                    'chat_id' => $targetChat,
-                    'caption' => $caption,
-                    'parse_mode' => 'HTML',
-                ]));
-
-            return $response->successful();
-        } catch (\Throwable $e) {
-            Log::error('Telegram sendDocument exception: ' . $e->getMessage());
+        $targets = $chatId ? [(string) $chatId] : $this->getAuthorizedChatIds();
+        if (empty($targets)) {
             return false;
         }
+
+        $allSuccess = true;
+        foreach ($targets as $targetChat) {
+            try {
+                $response = Http::timeout(60)
+                    ->attach('document', file_get_contents($filePath), basename($filePath))
+                    ->post("https://api.telegram.org/bot{$this->token}/sendDocument", array_filter([
+                        'chat_id' => $targetChat,
+                        'caption' => $caption,
+                        'parse_mode' => 'HTML',
+                    ]));
+
+                if (! $response->successful()) {
+                    $allSuccess = false;
+                }
+            } catch (\Throwable $e) {
+                Log::error("Telegram sendDocument exception for chat {$targetChat}: " . $e->getMessage());
+                $allSuccess = false;
+            }
+        }
+
+        return $allSuccess;
     }
 
     /**
@@ -161,18 +247,54 @@ class TelegramService
 
         $chatId = (string) ($message['chat']['id'] ?? '');
         $text = trim((string) ($update['message']['text'] ?? $update['callback_query']['data'] ?? ''));
-
-        // Авторизация: бот отвечает ТОЛЬКО владельцу (adminChatId)
-        if ($chatId !== (string) $this->adminChatId) {
-            $this->sendMessage("⛔️ <b>Доступ запрещен.</b>\nЭтот бот настроен исключительно для владельца магазина.", $chatId);
-            return false;
-        }
+        $userName = $message['from']['first_name'] ?? 'Сотрудник';
 
         $menu = $this->getMainMenuKeyboard();
         $norm = mb_strtolower($text);
 
+        // 1. ПРОВЕРКА АВТОРИЗАЦИИ: если пользователь еще не авторизован
+        if (! $this->isChatAuthorized($chatId)) {
+            $expectedPassword = $this->getBotPassword();
+
+            // Проверяем, совпадает ли текст с мастер-паролем
+            if ($text === $expectedPassword || $norm === mb_strtolower($expectedPassword)) {
+                $this->authorizeChat($chatId);
+
+                $successMsg = "🎉 <b>Пароль принят! Доступ успешно открыт.</b>\n\n"
+                    . "Здравствуйте, <b>{$userName}</b>!\n"
+                    . "Ваш Telegram-аккаунт успешно подключен к магазину детской одежды <b>Durability Store</b>.\n\n"
+                    . "Вам открыт доступ ко всем сводкам кассы, отчетам по пошиву формы и диагностике.\n"
+                    . "<i>Используйте кнопки меню внизу экрана для быстрой работы:</i>";
+
+                return $this->sendMessage($successMsg, $chatId, 'HTML', $menu);
+            }
+
+            // Если пароль не введен или неверный
+            $promptMsg = "🔒 <b>Вход в панель управления магазином</b>\n\n"
+                . "Здравствуйте, <b>{$userName}</b>!\n"
+                . "Бот защищен паролем. Для получения доступа отправьте <b>пароль администратора</b> сюда в чат:\n\n"
+                . "<i>(После правильного ввода пароля доступ сохранится автоматически).</i>";
+
+            return $this->sendMessage($promptMsg, $chatId);
+        }
+
+        // 2. ДЕАВТОРИЗАЦИЯ (/logout)
+        if ($norm === '/logout' || $norm === 'выйти') {
+            if ($chatId !== (string) $this->adminChatId) {
+                $this->deauthorizeChat($chatId);
+            }
+            return $this->sendMessage(
+                "👋 <b>Вы вышли из системы.</b>\nДля повторного входа потребуется снова отправить пароль.",
+                $chatId,
+                'HTML',
+                ['remove_keyboard' => true]
+            );
+        }
+
+        // 3. ОСНОВНЫЕ КОМАНДЫ ДЛЯ АВТОРИЗОВАННЫХ ПОЛЬЗОВАТЕЛЕЙ
         if ($norm === '/start' || $norm === '❓ справка' || $norm === 'справка' || $norm === 'меню' || $norm === '/help') {
             $welcome = "👋 <b>Панель управления магазином детской одежды и школьной формы!</b>\n\n"
+                . "Здравствуйте, <b>{$userName}</b>!\n"
                 . "Я ваш персональный Telegram-помощник для системы <b>Durability Store</b>.\n\n"
                 . "<b>Доступные функции:</b>\n"
                 . "📊 <b>Касса сегодня</b> — срез продаж, выручки и среднего чека прямо сейчас.\n"
@@ -247,17 +369,15 @@ class TelegramService
         $totalSales = Sale::where('status', 'approved')->count();
         $totalProducts = Product::count();
         $totalUsers = User::where('is_active', true)->count();
+        $authorizedCount = count($this->getAuthorizedChatIds());
 
         $lastSale = Sale::latest('created_at')->first();
         $lastSaleTime = $lastSale ? ($lastSale->created_at?->format('d.m.Y H:i') ?? '—') : '—';
         $lastSaleSum = $lastSale ? number_format((float) $lastSale->subtotal, 0, '.', ' ') . ' ₸' : '—';
         $lastSaleNum = $lastSale ? '№' . $lastSale->id : '—';
 
-        // Свободное место на диске
         $freeSpace = @disk_free_space('.');
         $freeDiskStr = $freeSpace ? round($freeSpace / (1024 * 1024 * 1024), 1) . ' ГБ' : '—';
-
-        // Использование памяти PHP
         $memoryMb = round(memory_get_usage(true) / (1024 * 1024), 1) . ' МБ';
 
         $now = now()->format('d.m.Y H:i:s');
@@ -280,6 +400,7 @@ class TelegramService
             . " • Свободно на диске: <b>{$freeDiskStr}</b>\n"
             . " • Выделенная память PHP: <b>{$memoryMb}</b>\n"
             . " • Окружение: <b>PHP " . PHP_VERSION . " / Laravel 11</b>\n"
+            . " • Авторизованных Telegram-устройств: <b>{$authorizedCount}</b>\n"
             . " • Мониторинг Telegram: <b>Активен ✅</b>";
     }
 

@@ -38,6 +38,7 @@ return [
     'telegram' => [
         'bot_token' => env('TELEGRAM_BOT_TOKEN'),
         'admin_chat_id' => env('TELEGRAM_ADMIN_CHAT_ID'),
+        'bot_password' => env('TELEGRAM_BOT_PASSWORD', env('ADMIN_PASSWORD', 'ChangeMe123!')),
     ],
 
 ];
