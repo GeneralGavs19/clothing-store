@@ -259,6 +259,52 @@
                   placeholder="0"
                   required
                 />
+                <!-- Быстрые кнопки скидок для быстрой продажи -->
+                <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <span class="text-[11px] text-slate-400">Скидка:</span>
+                  <button
+                    type="button"
+                    class="rounded border px-2 py-0.5 text-[11px] font-semibold transition"
+                    :class="quickDiscountType === '10'
+                      ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 font-bold'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-blue-400 hover:text-blue-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'"
+                    title="Скидка 10%"
+                    @click="applyQuickDiscount('10')"
+                  >
+                    -10%
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded border px-2 py-0.5 text-[11px] font-semibold transition"
+                    :class="quickDiscountType === '15'
+                      ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 font-bold'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-indigo-400 hover:text-indigo-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'"
+                    title="Скидка 15%"
+                    @click="applyQuickDiscount('15')"
+                  >
+                    -15%
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded border px-2.5 py-0.5 text-[11px] font-bold transition flex items-center gap-1"
+                    :class="quickDiscountType === 'free' || Number(quickForm.sale_price) === 0
+                      ? 'border-emerald-500 bg-emerald-600 text-white shadow-sm'
+                      : 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'"
+                    title="Бесплатно для учителей (0 ₸)"
+                    @click="applyQuickDiscount('free')"
+                  >
+                    🎁 Бесплатно (0 ₸)
+                  </button>
+                  <button
+                    v-if="quickDiscountType"
+                    type="button"
+                    class="text-[11px] text-rose-500 hover:underline ml-1"
+                    title="Сбросить скидку"
+                    @click="applyQuickDiscount(null)"
+                  >
+                    ✕ Сброс
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -607,11 +653,58 @@
             </div>
           </div>
 
-          <div class="max-h-[24rem] space-y-2 overflow-y-auto pr-1">
+          <!-- Панель быстрых скидок на чек (необязательно, для ускорения работы) -->
+          <div class="rounded-xl border border-slate-200 bg-slate-50/80 p-2.5 text-xs dark:border-slate-800 dark:bg-slate-900/50">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                Быстрые скидки для чека:
+              </span>
+              <button
+                v-if="hasAnyDiscount"
+                type="button"
+                class="text-[11px] font-semibold text-rose-500 hover:underline flex items-center gap-0.5"
+                @click="applyAllDiscount(null)"
+              >
+                ✕ Сбросить скидки
+              </button>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button
+                type="button"
+                class="rounded-lg border border-blue-200 bg-white py-1 px-1 text-center text-[11px] font-bold text-blue-700 shadow-sm transition hover:bg-blue-50 dark:border-blue-900 dark:bg-slate-800 dark:text-blue-300 dark:hover:bg-blue-950"
+                title="Сделать скидку 10% на все товары в чеке"
+                @click="applyAllDiscount('10')"
+              >
+                -10% всем
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-indigo-200 bg-white py-1 px-1 text-center text-[11px] font-bold text-indigo-700 shadow-sm transition hover:bg-indigo-50 dark:border-indigo-900 dark:bg-slate-800 dark:text-indigo-300 dark:hover:bg-indigo-950"
+                title="Сделать скидку 15% на все товары в чеке"
+                @click="applyAllDiscount('15')"
+              >
+                -15% всем
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-emerald-300 bg-emerald-50 py-1 px-1 text-center text-[11px] font-bold text-emerald-800 shadow-sm transition hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 dark:hover:bg-emerald-900/60 flex items-center justify-center gap-1"
+                title="Сделать все товары бесплатными (например, для учителей)"
+                @click="applyAllDiscount('free')"
+              >
+                <span>🎁 Учителям 0₸</span>
+              </button>
+            </div>
+            <p class="mt-1.5 text-[10px] text-slate-400">
+              💡 Нажимать кнопки не обязательно — если скидок нет, просто оформляйте чек как обычно.
+            </p>
+          </div>
+
+          <div class="max-h-[26rem] space-y-2 overflow-y-auto pr-1">
             <div
               v-for="item in cart"
               :key="item.product_variant_id"
               class="rounded-lg border border-slate-200 p-3 transition hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700"
+              :class="item.discount_type === 'free' || item.price === 0 ? 'bg-emerald-50/40 border-emerald-300 dark:border-emerald-900 dark:bg-emerald-950/20' : ''"
             >
               <div class="flex items-start justify-between gap-2">
                 <div class="min-w-0 flex-1">
@@ -620,11 +713,46 @@
                     <span>Размер: <strong class="text-slate-800 dark:text-slate-200">{{ item.variant.size }}</strong></span>
                     <span v-if="item.product.type" class="rounded bg-slate-100 px-1.5 py-0.2 text-[10px] dark:bg-slate-800">{{ item.product.type }}</span>
                   </div>
-                  <div class="mt-1 text-sm font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-                    {{ money(item.price * item.quantity) }}
-                    <span v-if="item.quantity > 1" class="text-xs font-normal text-slate-500">
-                      ({{ money(item.price) }} / шт.)
-                    </span>
+
+                  <!-- Отображение стоимости позиции -->
+                  <div class="mt-1 flex flex-wrap items-baseline gap-1.5">
+                    <!-- Бесплатно для учителей -->
+                    <template v-if="item.discount_type === 'free' || Number(item.price) === 0">
+                      <span class="text-sm font-black text-emerald-600 dark:text-emerald-400 tabular-nums">0 ₸</span>
+                      <span class="text-xs text-slate-400 line-through tabular-nums">{{ money((item.original_price || item.price) * item.quantity) }}</span>
+                      <span class="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                        🎁 Бесплатно (учителям)
+                      </span>
+                    </template>
+                    <!-- Со скидкой (10%, 15% или ручной) -->
+                    <template v-else-if="item.discount_type || (item.original_price && Number(item.price) < Number(item.original_price))">
+                      <span class="text-sm font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                        {{ money(item.price * item.quantity) }}
+                      </span>
+                      <span class="text-xs text-slate-400 line-through tabular-nums">{{ money(item.original_price * item.quantity) }}</span>
+                      <span
+                        class="rounded px-1.5 py-0.5 text-[10px] font-bold"
+                        :class="item.discount_type === '10'
+                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                          : item.discount_type === '15'
+                          ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
+                          : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'"
+                      >
+                        {{ item.discount_type === '10' ? '-10%' : item.discount_type === '15' ? '-15%' : 'Скидка' }}
+                      </span>
+                      <span v-if="item.quantity > 1" class="text-[11px] text-slate-400">
+                        ({{ money(item.price) }}/шт.)
+                      </span>
+                    </template>
+                    <!-- Стандартная цена без скидки -->
+                    <template v-else>
+                      <div class="text-sm font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {{ money(item.price * item.quantity) }}
+                        <span v-if="item.quantity > 1" class="text-xs font-normal text-slate-500">
+                          ({{ money(item.price) }} / шт.)
+                        </span>
+                      </div>
+                    </template>
                   </div>
                 </div>
 
@@ -654,6 +782,94 @@
                   </button>
                 </div>
               </div>
+
+              <!-- Кнопки выбора скидки на конкретную позицию -->
+              <div class="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2 dark:border-slate-800/80">
+                <span class="text-[11px] font-medium text-slate-400 mr-0.5">Скидка:</span>
+
+                <!-- 0% (Без скидки) -->
+                <button
+                  type="button"
+                  class="rounded-md px-2 py-0.5 text-[11px] font-semibold transition"
+                  :class="!item.discount_type && Number(item.price) === Number(item.original_price ?? item.price)
+                    ? 'bg-slate-200 text-slate-800 font-bold dark:bg-slate-700 dark:text-slate-200'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'"
+                  title="Обычная цена товара (без скидки)"
+                  @click="applyItemDiscount(item, null)"
+                >
+                  0%
+                </button>
+
+                <!-- -10% -->
+                <button
+                  type="button"
+                  class="rounded-md px-2 py-0.5 text-[11px] font-semibold transition"
+                  :class="item.discount_type === '10'
+                    ? 'bg-blue-600 text-white font-bold shadow-sm dark:bg-blue-500'
+                    : 'bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-950/60 dark:text-blue-300 dark:hover:bg-blue-900/60'"
+                  title="Скидка 10% на эту позицию"
+                  @click="applyItemDiscount(item, '10')"
+                >
+                  -10%
+                </button>
+
+                <!-- -15% -->
+                <button
+                  type="button"
+                  class="rounded-md px-2 py-0.5 text-[11px] font-semibold transition"
+                  :class="item.discount_type === '15'
+                    ? 'bg-indigo-600 text-white font-bold shadow-sm dark:bg-indigo-500'
+                    : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:text-indigo-300 dark:hover:bg-indigo-900/60'"
+                  title="Скидка 15% на эту позицию"
+                  @click="applyItemDiscount(item, '15')"
+                >
+                  -15%
+                </button>
+
+                <!-- 🎁 Бесплатно (для учителей) -->
+                <button
+                  type="button"
+                  class="rounded-md px-2.5 py-0.5 text-[11px] font-bold transition flex items-center gap-1"
+                  :class="item.discount_type === 'free' || Number(item.price) === 0
+                    ? 'bg-emerald-600 text-white shadow-sm dark:bg-emerald-500'
+                    : 'border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-900/60'"
+                  title="Бесплатно (например, для учителей) — 0 ₸"
+                  @click="applyItemDiscount(item, 'free')"
+                >
+                  <span>🎁 Бесплатно</span>
+                  <span class="text-[9px] opacity-80">(0 ₸)</span>
+                </button>
+
+                <!-- Кнопка ручной правки цены при необходимости -->
+                <button
+                  v-if="!item.customPriceActive"
+                  type="button"
+                  class="text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline ml-auto"
+                  title="Ввести произвольную цену"
+                  @click="item.customPriceActive = true"
+                >
+                  Своя цена
+                </button>
+                <div v-else class="flex items-center gap-1 ml-auto">
+                  <input
+                    v-model.number="item.price"
+                    type="number"
+                    min="0"
+                    step="50"
+                    class="input h-6 w-20 text-[11px] px-1 font-semibold text-right"
+                    placeholder="Цена"
+                    @change="item.discount_type = 'custom'"
+                  />
+                  <button
+                    type="button"
+                    class="text-[11px] text-slate-400 hover:text-slate-600"
+                    title="Закрыть"
+                    @click="item.customPriceActive = false"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -663,7 +879,7 @@
               v-model="cashierNote"
               class="textarea"
               rows="2"
-              placeholder="Необязательно (номер транзакции, способ оплаты, данные покупателя...)"
+              placeholder="Необязательно (например: Для учителей, номер чека, данные покупателя...)"
             />
           </label>
 
@@ -681,11 +897,21 @@
               <span>Всего позиций:</span>
               <span class="font-medium text-slate-700 dark:text-slate-300">{{ totalCartUnits }} шт.</span>
             </div>
+            <!-- Строка скидки / экономии если есть скидка -->
+            <div v-if="cartTotalSavings > 0" class="mt-1 flex items-center justify-between text-xs text-emerald-600 dark:text-emerald-400 font-bold">
+              <span>Скидка / Экономия:</span>
+              <span class="tabular-nums">-{{ money(cartTotalSavings) }}</span>
+            </div>
             <div class="mt-2 flex items-baseline justify-between border-t border-slate-200 pt-2 dark:border-slate-800">
               <span class="text-sm font-medium text-slate-700 dark:text-slate-300">Итого к оплате:</span>
-              <span class="text-2xl font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
-                {{ money(cartTotal) }}
-              </span>
+              <div class="text-right">
+                <div v-if="cartTotalSavings > 0" class="text-xs text-slate-400 line-through tabular-nums">
+                  {{ money(cartOriginalTotal) }}
+                </div>
+                <span class="text-2xl font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
+                  {{ money(cartTotal) }}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -990,9 +1216,18 @@
               <!-- Итоговая сумма чека и кнопки действий -->
               <div class="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
                 <div class="text-right">
-                  <div class="text-lg sm:text-xl font-black tabular-nums text-emerald-600 dark:text-emerald-400">
+                  <div
+                    class="text-lg sm:text-xl font-black tabular-nums"
+                    :class="Number(sale.subtotal) === 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-emerald-600 dark:text-emerald-400'"
+                  >
                     {{ money(sale.subtotal) }}
                   </div>
+                  <span
+                    v-if="Number(sale.subtotal) === 0"
+                    class="inline-block rounded bg-emerald-100 px-1.5 py-0.2 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                  >
+                    🎁 Бесплатно
+                  </span>
                 </div>
 
                 <div class="flex items-center gap-1.5">
@@ -1087,7 +1322,10 @@
                   </div>
 
                   <div class="flex items-center gap-3 text-right">
-                    <span class="text-slate-500">
+                    <span v-if="Number(item.sale_price) === 0 || Number(item.line_total) === 0" class="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                      🎁 Бесплатно × {{ item.quantity }} шт.
+                    </span>
+                    <span v-else class="text-slate-500">
                       {{ money(item.sale_price) }} × <strong class="text-slate-800 dark:text-slate-200">{{ item.quantity }} шт.</strong>
                     </span>
                     <span class="font-bold tabular-nums text-slate-900 dark:text-white min-w-20 text-right">
@@ -1447,6 +1685,32 @@
                         class="input h-8 text-xs font-semibold w-24 text-right"
                         required
                       />
+                      <div class="mt-1 flex items-center gap-1">
+                        <button
+                          type="button"
+                          class="rounded px-1 py-0.5 text-[10px] font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-300"
+                          title="Скидка 10%"
+                          @click="item.sale_price = Math.round(Number(item.sale_price || 0) * 0.9)"
+                        >
+                          -10%
+                        </button>
+                        <button
+                          type="button"
+                          class="rounded px-1 py-0.5 text-[10px] font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950 dark:text-indigo-300"
+                          title="Скидка 15%"
+                          @click="item.sale_price = Math.round(Number(item.sale_price || 0) * 0.85)"
+                        >
+                          -15%
+                        </button>
+                        <button
+                          type="button"
+                          class="rounded px-1 py-0.5 text-[10px] font-bold bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-300"
+                          title="Бесплатно (для учителей)"
+                          @click="item.sale_price = 0"
+                        >
+                          🎁 0₸
+                        </button>
+                      </div>
                     </div>
 
                     <!-- Количество -->
@@ -1832,6 +2096,38 @@ watch(() => quickForm.value.sold_at, (val) => {
   if (val) updateLastUsedDate(val)
 })
 
+// Быстрые скидки для быстрой продажи
+const quickDiscountType = ref(null)
+const quickBasePrice = ref(null)
+
+function applyQuickDiscount(discountType) {
+  const currentPrice = Number(quickForm.value.sale_price || 0)
+  if (quickBasePrice.value === null || quickBasePrice.value === 0) {
+    if (currentPrice > 0) {
+      quickBasePrice.value = currentPrice
+    }
+  }
+
+  // Toggle при повторном клике
+  if (quickDiscountType.value === discountType && discountType !== null) {
+    discountType = null
+  }
+
+  quickDiscountType.value = discountType
+  const base = quickBasePrice.value || currentPrice || 0
+
+  if (discountType === 'free') {
+    quickForm.value.sale_price = 0
+  } else if (discountType === '10') {
+    quickForm.value.sale_price = Math.round(base * 0.9)
+  } else if (discountType === '15') {
+    quickForm.value.sale_price = Math.round(base * 0.85)
+  } else {
+    // Сброс на базовую цену
+    quickForm.value.sale_price = base > 0 ? base : ''
+  }
+}
+
 const apiBase = computed(() => resolveApiOrigin())
 
 const stepHint = computed(() => {
@@ -1852,6 +2148,70 @@ const totalCartUnits = computed(() =>
 const cartTotal = computed(() =>
   cart.value.reduce((sum, row) => sum + Number(row.price || 0) * Number(row.quantity || 1), 0),
 )
+
+// Исходная сумма корзины без скидок
+const cartOriginalTotal = computed(() =>
+  cart.value.reduce(
+    (sum, row) => sum + Number(row.original_price ?? row.price ?? 0) * Number(row.quantity || 1),
+    0,
+  ),
+)
+
+// Суммарная экономия (скидка) по всему чеку
+const cartTotalSavings = computed(() => {
+  return Math.max(0, cartOriginalTotal.value - cartTotal.value)
+})
+
+// Есть ли хоть одна позиция со скидкой
+const hasAnyDiscount = computed(() => {
+  return cart.value.some(
+    (row) =>
+      row.discount_type ||
+      (row.original_price !== undefined && Number(row.price) !== Number(row.original_price)),
+  )
+})
+
+// Применение скидки к конкретной позиции в чеке
+function applyItemDiscount(item, discountType) {
+  if (item.original_price === undefined || item.original_price === null) {
+    item.original_price = Number(item.price || item.variant?.sale_price || item.product?.sale_price || 0)
+  }
+
+  // Toggle: если нажали ту же кнопку повторно — снимаем скидку
+  if (item.discount_type === discountType && discountType !== null) {
+    discountType = null
+  }
+
+  item.discount_type = discountType
+  item.customPriceActive = false
+
+  if (discountType === 'free') {
+    item.price = 0
+  } else if (discountType === '10') {
+    item.price = Math.round(item.original_price * 0.9)
+  } else if (discountType === '15') {
+    item.price = Math.round(item.original_price * 0.85)
+  } else {
+    // 0% / сброс
+    item.price = item.original_price
+  }
+}
+
+// Применение скидки ко всем позициям в чеке
+function applyAllDiscount(discountType) {
+  cart.value.forEach((item) => {
+    applyItemDiscount(item, discountType)
+  })
+  if (discountType === 'free') {
+    toast.push('Все позиции сделаны бесплатными (0 ₸, например для учителей)', 'success')
+  } else if (discountType === '10') {
+    toast.push('Скидка 10% применена ко всем позициям', 'info')
+  } else if (discountType === '15') {
+    toast.push('Скидка 15% применена ко всем позициям', 'info')
+  } else if (discountType === null) {
+    toast.push('Скидки сброшены на обычные цены', 'info')
+  }
+}
 
 const editFormTotal = computed(() => {
   return (editForm.value?.items || []).reduce(
@@ -1917,6 +2277,7 @@ function selectVariant(variant) {
   const full = (productDetail.value?.variants || []).find((v) => Number(v.id) === Number(variant.id)) || variant
   const product = productDetail.value || selectedProduct.value
   const existing = cart.value.find((c) => c.product_variant_id === full.id)
+  const initialPrice = Number(full.sale_price || product.sale_price || 0)
 
   if (existing) {
     existing.quantity++
@@ -1927,7 +2288,10 @@ function selectVariant(variant) {
       product_variant_id: full.id,
       product,
       variant: full,
-      price: Number(full.sale_price || product.sale_price || 0),
+      original_price: initialPrice,
+      price: initialPrice,
+      discount_type: null,
+      customPriceActive: false,
       quantity: 1,
     })
     toast.push(`Добавлено в чек: ${product.name} (${full.size})`)
@@ -1965,18 +2329,26 @@ async function createSale() {
   if (!cart.value.length || saving.value) return
   saving.value = true
   try {
+    const hasFreeItems = cart.value.some((r) => Number(r.price) === 0)
+    let note = cashierNote.value ? cashierNote.value.trim() : null
+    if (!note && hasFreeItems) {
+      const allFree = cart.value.every((r) => Number(r.price) === 0)
+      note = allFree ? 'Бесплатно (для учителей)' : 'В чеке есть бесплатные позиции (для учителей)'
+    }
+
     await sales.create({
       items: cart.value.map((row) => ({
         product_id: row.product.id,
         product_variant_id: row.product_variant_id,
         quantity: row.quantity,
+        sale_price: Number(row.price) || 0,
         source: 'display',
       })),
       sold_at: saleDate.value || undefined,
       due_date: cartIsOnOrder.value && saleDueDate.value ? saleDueDate.value : undefined,
       fulfillment_status: cartIsOnOrder.value ? 'new' : undefined,
       is_on_order: Boolean(cartIsOnOrder.value),
-      cashier_note: cashierNote.value ? cashierNote.value.trim() : null,
+      cashier_note: note,
     })
     const lastDate = saleDate.value || lastUsedSaleDate.value
     updateLastUsedDate(lastDate)
@@ -2000,13 +2372,18 @@ async function createSale() {
 
 async function submitQuickSale() {
   if (quickSaving.value) return
-  if (!quickForm.value.name || !quickForm.value.sale_price) {
+  if (!quickForm.value.name || quickForm.value.sale_price === '' || quickForm.value.sale_price === null || quickForm.value.sale_price === undefined) {
     toast.push('Укажите название и цену продажи', 'warning')
     return
   }
 
   quickSaving.value = true
   try {
+    let note = quickForm.value.cashier_note ? quickForm.value.cashier_note.trim() : null
+    if (!note && Number(quickForm.value.sale_price) === 0) {
+      note = 'Бесплатно (для учителей)'
+    }
+
     const payload = {
       name: quickForm.value.name.trim(),
       type: quickForm.value.type ? quickForm.value.type.trim() : null,
@@ -2014,14 +2391,14 @@ async function submitQuickSale() {
       category_name: quickForm.value.category_name ? quickForm.value.category_name.trim() : undefined,
       size: quickForm.value.size ? quickForm.value.size.trim() : '128',
       color: quickForm.value.color ? quickForm.value.color.trim() : null,
-      sale_price: Number(quickForm.value.sale_price),
+      sale_price: Number(quickForm.value.sale_price) || 0,
       purchase_price: 0,
       sold_at: quickForm.value.sold_at || undefined,
       due_date: quickForm.value.is_on_order && quickForm.value.due_date ? quickForm.value.due_date : undefined,
       fulfillment_status: quickForm.value.is_on_order ? 'new' : undefined,
       is_on_order: Boolean(quickForm.value.is_on_order),
       quantity: Math.max(1, Number(quickForm.value.quantity || 1)),
-      cashier_note: quickForm.value.cashier_note ? quickForm.value.cashier_note.trim() : null,
+      cashier_note: note,
     }
 
     await sales.createQuick(payload)
@@ -2031,6 +2408,9 @@ async function submitQuickSale() {
     const lastCatId = quickForm.value.category_id
     const lastSoldAt = quickForm.value.sold_at || lastUsedSaleDate.value
     updateLastUsedDate(lastSoldAt)
+
+    quickDiscountType.value = null
+    quickBasePrice.value = null
 
     quickForm.value = {
       name: '',
@@ -2131,22 +2511,29 @@ async function fetchHistory(page = 1) {
 function duplicateSaleToCart(sale) {
   if (!sale || !sale.items?.length) return
 
-  const itemsToAdd = sale.items.map((i) => ({
-    product: i.product || {
-      id: i.product_id,
-      name: i.product_name || 'Товар',
-      type: i.product_type,
-      sale_price: i.sale_price,
-    },
-    product_variant_id: i.product_variant_id,
-    variant: {
-      id: i.product_variant_id,
-      size: i.variant_size || '—',
-      sale_price: i.sale_price,
-    },
-    price: Number(i.sale_price) || 0,
-    quantity: Number(i.quantity) || 1,
-  }))
+  const itemsToAdd = sale.items.map((i) => {
+    const salePrice = Number(i.sale_price) || 0
+    const origPrice = Number(i.product?.sale_price || salePrice)
+    return {
+      product: i.product || {
+        id: i.product_id,
+        name: i.product_name || 'Товар',
+        type: i.product_type,
+        sale_price: i.sale_price,
+      },
+      product_variant_id: i.product_variant_id,
+      variant: {
+        id: i.product_variant_id,
+        size: i.variant_size || '—',
+        sale_price: i.sale_price,
+      },
+      original_price: origPrice,
+      price: salePrice,
+      discount_type: salePrice === 0 ? 'free' : null,
+      customPriceActive: false,
+      quantity: Number(i.quantity) || 1,
+    }
+  })
 
   cart.value = [...cart.value, ...itemsToAdd]
   cartIsOnOrder.value = Boolean(sale.is_on_order)
@@ -2440,7 +2827,13 @@ onMounted(() => {
     if (saved) {
       const parsed = JSON.parse(saved)
       if (Array.isArray(parsed) && parsed.length > 0) {
-        cart.value = parsed
+        cart.value = parsed.map((item) => ({
+          ...item,
+          original_price: Number(item.original_price ?? item.price ?? 0),
+          price: Number(item.price ?? item.original_price ?? 0),
+          discount_type: item.discount_type ?? null,
+          customPriceActive: false,
+        }))
       }
     }
   } catch (e) {}

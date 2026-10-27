@@ -71,6 +71,7 @@ class SaleController extends Controller
             'items.*.product_variant_id' => ['nullable', 'exists:product_variants,id'],
             'items.*.product_item_id' => ['nullable', 'exists:product_items,id'],
             'items.*.quantity' => ['nullable', 'integer', 'min:1'],
+            'items.*.sale_price' => ['nullable', 'numeric', 'min:0'],
             'items.*.source' => ['nullable', 'in:display,stock'],
             'is_on_order' => ['nullable', 'boolean'],
             'cashier_note' => ['nullable', 'string', 'max:1000'],

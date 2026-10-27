@@ -88,7 +88,9 @@ class SalesService
                 $source = ($item['source'] ?? 'display') === 'stock' ? 'stock' : 'display';
 
                 $purchase = (float) ($product->purchase_price ?? 0);
-                $salePrice = (float) $product->sale_price;
+                $salePrice = isset($item['sale_price']) && is_numeric($item['sale_price'])
+                    ? max(0, (float) $item['sale_price'])
+                    : (float) ($variant->sale_price ?? $product->sale_price ?? 0);
                 $lineTotal = round($salePrice * $quantity, 2);
                 $lineProfit = round(($salePrice - $purchase) * $quantity, 2);
 
@@ -151,7 +153,9 @@ class SalesService
         $source = $productItem->location === ProductItem::LOCATION_STOCK ? 'stock' : 'display';
 
         $purchase = (float) ($product->purchase_price ?? 0);
-        $salePrice = (float) $product->sale_price;
+        $salePrice = isset($item['sale_price']) && is_numeric($item['sale_price'])
+            ? max(0, (float) $item['sale_price'])
+            : (float) ($variant->sale_price ?? $product->sale_price ?? 0);
         $lineTotal = round($salePrice, 2);
         $lineProfit = round($salePrice - $purchase, 2);
 
