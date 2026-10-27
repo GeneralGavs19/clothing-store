@@ -1748,13 +1748,15 @@ let debounce
 let historyDebounce
 let timer
 
-// Быстрые названия товаров: Брюки.спорт, Поло к/р, Поло д/р, Бомбер, Худи
+// Быстрые названия товаров: Брюки.спорт, Поло к/р, Поло д/р, Бомбер, Худи, Футболка, Шорты
 const commonNames = [
   'Брюки.спорт',
   'Поло к/р',
   'Поло д/р',
   'Бомбер',
   'Худи',
+  'Футболка',
+  'Шорты',
 ]
 
 function setQuickName(name) {
@@ -1768,6 +1770,10 @@ function setQuickName(name) {
     quickForm.value.type = 'Бомбер'
   } else if (lower.includes('худи')) {
     quickForm.value.type = 'Худи'
+  } else if (lower.includes('футболк')) {
+    quickForm.value.type = 'Футболка'
+  } else if (lower.includes('шорт')) {
+    quickForm.value.type = 'Шорты'
   }
 }
 
@@ -1799,9 +1805,9 @@ const popularTypes = [
   'Костюм',
 ]
 
-// Размеры: 116-164 + 170, 176, 182, 188, 194 + XS, S, M, L, XL, XXL
+// Размеры: 110 + 116-164 + 170, 176, 182, 188, 194 + XS, S, M, L, XL, XXL
 const commonSizes = [
-  '116', '122', '128', '134', '140', '146', '152', '158', '164',
+  '110', '116', '122', '128', '134', '140', '146', '152', '158', '164',
   '170', '176', '182', '188', '194',
   'XS', 'S', 'M', 'L', 'XL', 'XXL',
 ]

@@ -170,7 +170,7 @@
                 class="rounded-md border border-emerald-300 bg-white px-2 py-1 font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:bg-slate-800 dark:text-emerald-300"
                 @click="addPresetSizes(schoolSizes)"
               >
-                + Школьная форма (116–164)
+                + Школьная форма (110–194)
               </button>
               <button
                 type="button"
@@ -595,7 +595,7 @@ function quickAddSizesPrompt() {
   form.variants.push({ ...blankVariant(), size: size.trim(), stock_store: 0 })
 }
 
-const schoolSizes = ['116', '122', '128', '134', '140', '146', '152', '158', '164']
+const schoolSizes = ['110', '116', '122', '128', '134', '140', '146', '152', '158', '164', '170', '176', '182', '188', '194']
 const letterSizes = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL']
 const toddlerSizes = ['86', '92', '98', '104', '110']
 const bulkSizesInput = ref('')
