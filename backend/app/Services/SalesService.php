@@ -19,6 +19,39 @@ class SalesService
 {
     public function __construct(private ProductItemService $itemService) {}
 
+    /**
+     * Единая функция расчета скидки по формуле из ТЗ:
+     * Сумма скидки = round(Исходная сумма * Процент скидки / 100)
+     * Итоговая сумма = Исходная сумма - Сумма скидки
+     */
+    public static function calculateDiscount(float $originalPrice, float $discountPercent): array
+    {
+        $originalPrice = max(0.0, round($originalPrice, 2));
+        $discountPercent = max(0.0, min(100.0, (float) $discountPercent));
+
+        if ($discountPercent == 100.0) {
+            return [
+                'discount_amount' => $originalPrice,
+                'sale_price' => 0.0,
+            ];
+        }
+
+        if ($discountPercent <= 0.0) {
+            return [
+                'discount_amount' => 0.0,
+                'sale_price' => $originalPrice,
+            ];
+        }
+
+        $discountAmount = round(($originalPrice * $discountPercent) / 100, 2);
+        $salePrice = max(0.0, round($originalPrice - $discountAmount, 2));
+
+        return [
+            'discount_amount' => $discountAmount,
+            'sale_price' => $salePrice,
+        ];
+    }
+
     public function createCompleted(
         User $cashier,
         array $items,
@@ -26,9 +59,12 @@ class SalesService
         bool $isOnOrder = false,
         $customDate = null,
         ?string $dueDate = null,
-        ?string $fulfillmentStatus = null
+        ?string $fulfillmentStatus = null,
+        float $discountPercent = 0.0,
+        ?float $discountAmount = null,
+        ?float $originalSubtotal = null
     ): Sale {
-        return DB::transaction(function () use ($cashier, $items, $note, $isOnOrder, $customDate, $dueDate, $fulfillmentStatus) {
+        return DB::transaction(function () use ($cashier, $items, $note, $isOnOrder, $customDate, $dueDate, $fulfillmentStatus, $discountPercent, $discountAmount, $originalSubtotal) {
             $itemIds = collect($items)->pluck('product_item_id')->filter()->unique()->values();
             $productItems = ProductItem::query()->whereIn('id', $itemIds)->lockForUpdate()->get()->keyBy('id');
 
@@ -68,8 +104,9 @@ class SalesService
                 'cashier_note' => $note,
             ]);
 
-            $subtotal = 0;
-            $profit = 0;
+            $subtotal = 0.0;
+            $rawOriginalSubtotal = 0.0;
+            $profit = 0.0;
             $totalQty = 0;
 
             foreach ($items as $item) {
@@ -78,7 +115,7 @@ class SalesService
                     : null;
 
                 if ($productItem) {
-                    $this->processItemSale($sale, $cashier, $productItem, $item, $variants, $products, $subtotal, $profit, $totalQty);
+                    $this->processItemSale($sale, $cashier, $productItem, $item, $variants, $products, $subtotal, $profit, $totalQty, $rawOriginalSubtotal, $discountPercent);
                     continue;
                 }
 
@@ -88,9 +125,30 @@ class SalesService
                 $source = ($item['source'] ?? 'display') === 'stock' ? 'stock' : 'display';
 
                 $purchase = (float) ($product->purchase_price ?? 0);
-                $salePrice = isset($item['sale_price']) && is_numeric($item['sale_price'])
-                    ? max(0, (float) $item['sale_price'])
-                    : (float) ($variant->sale_price ?? $product->sale_price ?? 0);
+                $rawBasePrice = (float) ($variant->sale_price ?? $product->sale_price ?? 0);
+                $originalPrice = isset($item['original_price']) && is_numeric($item['original_price']) && (float) $item['original_price'] > 0
+                    ? (float) $item['original_price']
+                    : $rawBasePrice;
+
+                $itemDiscountPercent = isset($item['discount_percent']) && is_numeric($item['discount_percent'])
+                    ? (float) $item['discount_percent']
+                    : $discountPercent;
+
+                if ($itemDiscountPercent == 100) {
+                    $salePrice = 0.0;
+                    $itemDiscountAmount = $originalPrice;
+                } elseif ($itemDiscountPercent > 0) {
+                    $calc = self::calculateDiscount($originalPrice, $itemDiscountPercent);
+                    $salePrice = $calc['sale_price'];
+                    $itemDiscountAmount = $calc['discount_amount'];
+                } else {
+                    $itemDiscountPercent = 0.0;
+                    $itemDiscountAmount = 0.0;
+                    $salePrice = isset($item['sale_price']) && is_numeric($item['sale_price'])
+                        ? max(0.0, (float) $item['sale_price'])
+                        : $originalPrice;
+                }
+
                 $lineTotal = round($salePrice * $quantity, 2);
                 $lineProfit = round(($salePrice - $purchase) * $quantity, 2);
 
@@ -107,6 +165,9 @@ class SalesService
                     'source_location' => $source,
                     'variant_size' => $variantLabel,
                     'purchase_price' => $purchase,
+                    'original_price' => $originalPrice,
+                    'discount_percent' => $itemDiscountPercent,
+                    'discount_amount' => $itemDiscountAmount,
                     'sale_price' => $salePrice,
                     'line_total' => $lineTotal,
                     'line_profit' => $lineProfit,
@@ -121,13 +182,20 @@ class SalesService
                 $this->recordStockMovement($sale, $cashier, $product, -1 * $quantity);
 
                 $subtotal += $lineTotal;
+                $rawOriginalSubtotal += round($originalPrice * $quantity, 2);
                 $profit += $lineProfit;
                 $totalQty += $quantity;
             }
 
+            $finalOriginalSubtotal = $originalSubtotal !== null ? max(0.0, (float) $originalSubtotal) : $rawOriginalSubtotal;
+            $finalDiscountAmount = $discountAmount !== null ? max(0.0, (float) $discountAmount) : max(0.0, round($finalOriginalSubtotal - $subtotal, 2));
+
             $sale->update([
                 'number' => $this->humanNumber($sale->id, $soldAt, $totalQty, $subtotal),
                 'subtotal' => $subtotal,
+                'original_subtotal' => $finalOriginalSubtotal,
+                'discount_percent' => $discountPercent,
+                'discount_amount' => $finalDiscountAmount,
                 'profit' => $profit,
             ]);
 
@@ -147,15 +215,38 @@ class SalesService
         float &$subtotal,
         float &$profit,
         int &$totalQty,
+        float &$rawOriginalSubtotal,
+        float $saleDiscountPercent = 0.0,
     ): void {
         $variant = $variantsById->get((int) $productItem->product_variant_id);
         $product = $productsById->get((int) $variant->product_id);
         $source = $productItem->location === ProductItem::LOCATION_STOCK ? 'stock' : 'display';
 
         $purchase = (float) ($product->purchase_price ?? 0);
-        $salePrice = isset($item['sale_price']) && is_numeric($item['sale_price'])
-            ? max(0, (float) $item['sale_price'])
-            : (float) ($variant->sale_price ?? $product->sale_price ?? 0);
+        $rawBasePrice = (float) ($variant->sale_price ?? $product->sale_price ?? 0);
+        $originalPrice = isset($item['original_price']) && is_numeric($item['original_price']) && (float) $item['original_price'] > 0
+            ? (float) $item['original_price']
+            : $rawBasePrice;
+
+        $itemDiscountPercent = isset($item['discount_percent']) && is_numeric($item['discount_percent'])
+            ? (float) $item['discount_percent']
+            : $saleDiscountPercent;
+
+        if ($itemDiscountPercent == 100) {
+            $salePrice = 0.0;
+            $itemDiscountAmount = $originalPrice;
+        } elseif ($itemDiscountPercent > 0) {
+            $calc = self::calculateDiscount($originalPrice, $itemDiscountPercent);
+            $salePrice = $calc['sale_price'];
+            $itemDiscountAmount = $calc['discount_amount'];
+        } else {
+            $itemDiscountPercent = 0.0;
+            $itemDiscountAmount = 0.0;
+            $salePrice = isset($item['sale_price']) && is_numeric($item['sale_price'])
+                ? max(0.0, (float) $item['sale_price'])
+                : $originalPrice;
+        }
+
         $lineTotal = round($salePrice, 2);
         $lineProfit = round($salePrice - $purchase, 2);
 
@@ -171,6 +262,9 @@ class SalesService
             'source_location' => $source,
             'variant_size' => $variant->size,
             'purchase_price' => $purchase,
+            'original_price' => $originalPrice,
+            'discount_percent' => $itemDiscountPercent,
+            'discount_amount' => $itemDiscountAmount,
             'sale_price' => $salePrice,
             'line_total' => $lineTotal,
             'line_profit' => $lineProfit,
@@ -184,6 +278,7 @@ class SalesService
         $this->recordStockMovement($sale, $cashier, $product, -1);
 
         $subtotal += $lineTotal;
+        $rawOriginalSubtotal += $originalPrice;
         $profit += $lineProfit;
         $totalQty += 1;
     }
@@ -546,6 +641,7 @@ class SalesService
             $sale->items()->delete();
 
             $subtotal = 0.0;
+            $rawOriginalSubtotal = 0.0;
             $profit = 0.0;
             $totalQty = 0;
 
@@ -589,11 +685,31 @@ class SalesService
                 $productName = ! empty($row['product_name']) ? trim($row['product_name']) : ($product?->name ?? 'Товар');
                 $productType = ! empty($row['product_type']) ? trim($row['product_type']) : ($product?->type ?? null);
                 $variantSize = ! empty($row['variant_size']) ? trim($row['variant_size']) : ($variant?->size ?? '—');
-                $salePrice = isset($row['sale_price']) && is_numeric($row['sale_price'])
-                    ? (float) $row['sale_price']
-                    : (float) ($variant?->sale_price ?? $product?->sale_price ?? 0);
-                $purchasePrice = (float) ($variant?->purchase_price ?? $product?->purchase_price ?? 0);
+                
+                $rawBasePrice = (float) ($variant?->sale_price ?? $product?->sale_price ?? 0);
+                $origPrice = isset($row['original_price']) && is_numeric($row['original_price']) && (float) $row['original_price'] > 0
+                    ? (float) $row['original_price']
+                    : (isset($row['sale_price']) && (float) $row['sale_price'] > 0 ? (float) $row['sale_price'] : $rawBasePrice);
 
+                $itemDiscountPercent = isset($row['discount_percent']) && is_numeric($row['discount_percent'])
+                    ? (float) $row['discount_percent']
+                    : (float) ($data['discount_percent'] ?? $sale->discount_percent ?? 0);
+
+                if ($itemDiscountPercent == 100) {
+                    $salePrice = 0.0;
+                    $itemDiscountAmount = $origPrice;
+                } elseif ($itemDiscountPercent > 0) {
+                    $calc = self::calculateDiscount($origPrice, $itemDiscountPercent);
+                    $salePrice = $calc['sale_price'];
+                    $itemDiscountAmount = $calc['discount_amount'];
+                } else {
+                    $salePrice = isset($row['sale_price']) && is_numeric($row['sale_price'])
+                        ? max(0.0, (float) $row['sale_price'])
+                        : $origPrice;
+                    $itemDiscountAmount = max(0.0, round($origPrice - $salePrice, 2));
+                }
+
+                $purchasePrice = (float) ($variant?->purchase_price ?? $product?->purchase_price ?? 0);
                 $lineTotal = round($salePrice * $qty, 2);
                 $lineProfit = round(($salePrice - $purchasePrice) * $qty, 2);
 
@@ -608,6 +724,9 @@ class SalesService
                     'source_location' => $source,
                     'variant_size' => $variantSize,
                     'purchase_price' => $purchasePrice,
+                    'original_price' => $origPrice,
+                    'discount_percent' => $itemDiscountPercent,
+                    'discount_amount' => $itemDiscountAmount,
                     'sale_price' => $salePrice,
                     'line_total' => $lineTotal,
                     'line_profit' => $lineProfit,
@@ -625,13 +744,21 @@ class SalesService
                 }
 
                 $subtotal += $lineTotal;
+                $rawOriginalSubtotal += round($origPrice * $qty, 2);
                 $profit += $lineProfit;
                 $totalQty += $qty;
             }
 
+            $saleDiscountPercent = isset($data['discount_percent']) ? (float) $data['discount_percent'] : (float) $sale->discount_percent;
+            $saleOriginalSubtotal = isset($data['original_subtotal']) ? (float) $data['original_subtotal'] : $rawOriginalSubtotal;
+            $saleDiscountAmount = isset($data['discount_amount']) ? (float) $data['discount_amount'] : max(0.0, round($saleOriginalSubtotal - $subtotal, 2));
+
             $sale->update([
                 'number' => $this->humanNumber($sale->id, $soldAt, $totalQty, $subtotal),
                 'subtotal' => $subtotal,
+                'original_subtotal' => $saleOriginalSubtotal,
+                'discount_percent' => $saleDiscountPercent,
+                'discount_amount' => $saleDiscountAmount,
                 'profit' => $profit,
                 'is_on_order' => $isOnOrder,
                 'due_date' => $dueDate,
@@ -943,9 +1070,29 @@ class SalesService
                 }
             }
 
-            $finalSalePrice = $salePrice > 0 ? $salePrice : (float) $variant->sale_price;
+            $discountPercent = isset($data['discount_percent']) && is_numeric($data['discount_percent'])
+                ? (float) $data['discount_percent']
+                : 0.0;
+
+            $inputOriginalPrice = isset($data['original_price']) && is_numeric($data['original_price']) && (float) $data['original_price'] > 0
+                ? (float) $data['original_price']
+                : ($salePrice > 0 ? $salePrice : (float) ($product->sale_price ?? 0));
+
+            if ($discountPercent == 100) {
+                $finalSalePrice = 0.0;
+                $finalDiscountAmount = $inputOriginalPrice;
+            } elseif ($discountPercent > 0) {
+                $calc = self::calculateDiscount($inputOriginalPrice, $discountPercent);
+                $finalSalePrice = $calc['sale_price'];
+                $finalDiscountAmount = $calc['discount_amount'];
+            } else {
+                $finalSalePrice = $salePrice;
+                $finalDiscountAmount = max(0.0, round($inputOriginalPrice - $finalSalePrice, 2));
+            }
+
             $finalPurchasePrice = $purchasePrice > 0 ? $purchasePrice : (float) $variant->purchase_price;
             $lineTotal = round($finalSalePrice * $quantity, 2);
+            $lineOriginalTotal = round($inputOriginalPrice * $quantity, 2);
             $lineProfit = round(($finalSalePrice - $finalPurchasePrice) * $quantity, 2);
 
             $isOnOrder = ! empty($data['is_on_order']);
@@ -964,6 +1111,9 @@ class SalesService
                 'submitted_at' => $soldAt,
                 'created_at' => $soldAt,
                 'subtotal' => $lineTotal,
+                'original_subtotal' => $lineOriginalTotal,
+                'discount_percent' => $discountPercent,
+                'discount_amount' => round($finalDiscountAmount * $quantity, 2),
                 'profit' => $lineProfit,
                 'cashier_note' => isset($data['cashier_note']) ? strip_tags($data['cashier_note']) : null,
             ]);
@@ -979,6 +1129,9 @@ class SalesService
                 'source_location' => 'display',
                 'variant_size' => $variant->size,
                 'purchase_price' => $finalPurchasePrice,
+                'original_price' => $inputOriginalPrice,
+                'discount_percent' => $discountPercent,
+                'discount_amount' => $finalDiscountAmount,
                 'sale_price' => $finalSalePrice,
                 'line_total' => $lineTotal,
                 'line_profit' => $lineProfit,

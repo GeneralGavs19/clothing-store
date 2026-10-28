@@ -18,6 +18,9 @@ class Sale extends Model
         'due_date',
         'fulfillment_status',
         'subtotal',
+        'original_subtotal',
+        'discount_percent',
+        'discount_amount',
         'profit',
         'cashier_note',
         'admin_note',
@@ -32,6 +35,9 @@ class Sale extends Model
         'is_on_order' => 'boolean',
         'due_date' => 'date',
         'subtotal' => 'decimal:2',
+        'original_subtotal' => 'decimal:2',
+        'discount_percent' => 'decimal:2',
+        'discount_amount' => 'decimal:2',
         'profit' => 'decimal:2',
         'submitted_at' => 'datetime',
         'approved_at' => 'datetime',
@@ -72,7 +78,7 @@ class Sale extends Model
             return $this->number;
         }
 
-        if ($qty > 0 && $this->subtotal > 0) {
+        if ($qty > 0 && $this->subtotal !== null && $this->subtotal >= 0) {
             return sprintf('№%d · %s · %d шт. · %s ₸', $this->id, $date, $qty, $amount);
         }
 

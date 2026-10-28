@@ -71,8 +71,14 @@ class SaleController extends Controller
             'items.*.product_variant_id' => ['nullable', 'exists:product_variants,id'],
             'items.*.product_item_id' => ['nullable', 'exists:product_items,id'],
             'items.*.quantity' => ['nullable', 'integer', 'min:1'],
+            'items.*.original_price' => ['nullable', 'numeric', 'min:0'],
             'items.*.sale_price' => ['nullable', 'numeric', 'min:0'],
+            'items.*.discount_percent' => ['nullable', 'numeric', 'in:0,10,15,100'],
+            'items.*.discount_amount' => ['nullable', 'numeric', 'min:0'],
             'items.*.source' => ['nullable', 'in:display,stock'],
+            'discount_percent' => ['nullable', 'numeric', 'in:0,10,15,100'],
+            'discount_amount' => ['nullable', 'numeric', 'min:0'],
+            'original_subtotal' => ['nullable', 'numeric', 'min:0'],
             'is_on_order' => ['nullable', 'boolean'],
             'cashier_note' => ['nullable', 'string', 'max:1000'],
             'sold_at' => ['nullable', 'date'],
@@ -80,13 +86,30 @@ class SaleController extends Controller
             'fulfillment_status' => ['nullable', 'string', 'in:new,in_progress,ready,delivered,cancelled'],
         ]);
 
+        $saleDiscountPercent = (float) ($data['discount_percent'] ?? 0);
+
         foreach ($data['items'] as $index => $row) {
-            if (! empty($row['product_item_id'])) {
-                continue;
-            }
-            if (empty($row['product_variant_id']) || empty($row['quantity'])) {
+            if (empty($row['product_item_id']) && (empty($row['product_variant_id']) || empty($row['quantity']))) {
                 throw \Illuminate\Validation\ValidationException::withMessages([
                     "items.{$index}" => 'Укажите вариант и количество или выберите код товара.',
+                ]);
+            }
+
+            $itemDiscountPercent = isset($row['discount_percent']) ? (float) $row['discount_percent'] : $saleDiscountPercent;
+            $salePrice = isset($row['sale_price']) ? (float) $row['sale_price'] : null;
+            $originalPrice = isset($row['original_price']) ? (float) $row['original_price'] : null;
+
+            // Итоговая цена 0 ₸ разрешена исключительно при активной скидке 100%
+            if ($salePrice !== null && $salePrice <= 0.0 && $itemDiscountPercent != 100) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    "items.{$index}.sale_price" => 'Итоговая цена 0 ₸ разрешена исключительно при активной скидке 100% (Бесплатно).',
+                ]);
+            }
+
+            // При скидках 10% и 15% итоговая цена не должна становиться нулевой для товара с положительной исходной стоимостью
+            if (in_array($itemDiscountPercent, [10, 15]) && $originalPrice !== null && $originalPrice > 0 && $salePrice !== null && $salePrice <= 0.0) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    "items.{$index}.sale_price" => "При скидке {$itemDiscountPercent}% цена товара не может быть нулевой.",
                 ]);
             }
         }
@@ -98,7 +121,10 @@ class SaleController extends Controller
             (bool) ($data['is_on_order'] ?? false),
             $data['sold_at'] ?? null,
             $data['due_date'] ?? null,
-            $data['fulfillment_status'] ?? null
+            $data['fulfillment_status'] ?? null,
+            (float) ($data['discount_percent'] ?? 0),
+            isset($data['discount_amount']) ? (float) $data['discount_amount'] : null,
+            isset($data['original_subtotal']) ? (float) $data['original_subtotal'] : null
         );
 
         $logger->log('sales.created', $sale, ['number' => $sale->number], $request);
@@ -119,7 +145,10 @@ class SaleController extends Controller
             'category_name' => ['nullable', 'string', 'max:100'],
             'size' => ['required', 'string', 'max:64'],
             'color' => ['nullable', 'string', 'max:64'],
+            'original_price' => ['nullable', 'numeric', 'min:0'],
             'sale_price' => ['required', 'numeric', 'min:0'],
+            'discount_percent' => ['nullable', 'numeric', 'in:0,10,15,100'],
+            'discount_amount' => ['nullable', 'numeric', 'min:0'],
             'purchase_price' => ['nullable', 'numeric', 'min:0'],
             'quantity' => ['required', 'integer', 'min:1'],
             'remaining_stock' => ['nullable', 'integer', 'min:0'],
@@ -129,6 +158,24 @@ class SaleController extends Controller
             'due_date' => ['nullable', 'date'],
             'fulfillment_status' => ['nullable', 'string', 'in:new,in_progress,ready,delivered,cancelled'],
         ]);
+
+        $discountPercent = (float) ($data['discount_percent'] ?? 0);
+        $salePrice = (float) $data['sale_price'];
+        $originalPrice = isset($data['original_price']) ? (float) $data['original_price'] : $salePrice;
+
+        // Итоговая цена 0 ₸ разрешена исключительно при активной скидке 100%
+        if ($salePrice <= 0.0 && $discountPercent != 100) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'sale_price' => 'Итоговая цена 0 ₸ разрешена исключительно при активной скидке 100% (Бесплатно).',
+            ]);
+        }
+
+        // При скидках 10% и 15% итоговая цена не должна быть нулевой для товара с положительной стоимостью
+        if (in_array($discountPercent, [10, 15]) && $originalPrice > 0 && $salePrice <= 0.0) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'sale_price' => "При скидке {$discountPercent}% цена товара не может быть нулевой.",
+            ]);
+        }
 
         $result = $sales->createQuickSale($request->user(), $data);
 
@@ -217,6 +264,9 @@ class SaleController extends Controller
             'fulfillment_status' => ['nullable', 'string', 'in:new,in_progress,ready,delivered,cancelled'],
             'sold_at' => ['nullable', 'date'],
             'cashier_note' => ['nullable', 'string', 'max:1000'],
+            'discount_percent' => ['nullable', 'numeric', 'in:0,10,15,100'],
+            'discount_amount' => ['nullable', 'numeric', 'min:0'],
+            'original_subtotal' => ['nullable', 'numeric', 'min:0'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['nullable', 'exists:products,id'],
             'items.*.product_variant_id' => ['nullable', 'exists:product_variants,id'],
@@ -224,9 +274,32 @@ class SaleController extends Controller
             'items.*.product_type' => ['nullable', 'string', 'max:100'],
             'items.*.variant_size' => ['required', 'string', 'max:64'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.original_price' => ['nullable', 'numeric', 'min:0'],
+            'items.*.discount_percent' => ['nullable', 'numeric', 'in:0,10,15,100'],
+            'items.*.discount_amount' => ['nullable', 'numeric', 'min:0'],
             'items.*.sale_price' => ['required', 'numeric', 'min:0'],
             'items.*.source' => ['nullable', 'in:display,stock'],
         ]);
+
+        $saleDiscountPercent = (float) ($data['discount_percent'] ?? $sale->discount_percent ?? 0);
+
+        foreach ($data['items'] as $index => $row) {
+            $itemDiscountPercent = isset($row['discount_percent']) ? (float) $row['discount_percent'] : $saleDiscountPercent;
+            $salePrice = (float) $row['sale_price'];
+            $originalPrice = isset($row['original_price']) ? (float) $row['original_price'] : null;
+
+            if ($salePrice <= 0.0 && $itemDiscountPercent != 100) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    "items.{$index}.sale_price" => 'Итоговая цена 0 ₸ разрешена исключительно при активной скидке 100% (Бесплатно).',
+                ]);
+            }
+
+            if (in_array($itemDiscountPercent, [10, 15]) && $originalPrice !== null && $originalPrice > 0 && $salePrice <= 0.0) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    "items.{$index}.sale_price" => "При скидке {$itemDiscountPercent}% цена товара не может быть нулевой.",
+                ]);
+            }
+        }
 
         $sale->load(['items']);
         $oldItems = $sale->items->map(fn ($i) => [
