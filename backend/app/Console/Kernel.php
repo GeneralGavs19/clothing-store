@@ -28,6 +28,16 @@ class Kernel extends ConsoleKernel
 
         // Ночной бэкап базы данных SQLite в Telegram (в 23:30)
         $schedule->command('telegram:backup-db')->dailyAt('23:30');
+
+        // Еженедельная автоматическая проверка целостности базы данных SQLite
+        $schedule->call(function () {
+            if (config('database.default') === 'sqlite') {
+                $status = \Illuminate\Support\Facades\DB::select("PRAGMA quick_check")[0]->quick_check ?? 'error';
+                if ($status !== 'ok') {
+                    \Illuminate\Support\Facades\Log::critical("SQLite integrity check failed: {$status}");
+                }
+            }
+        })->weekly()->name('sqlite-integrity-check');
     }
 
     protected function commands(): void

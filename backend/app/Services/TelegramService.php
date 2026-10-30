@@ -602,7 +602,12 @@ class TelegramService
         $fileName = 'backup-store-' . $now->format('Y-m-d-His') . '.sqlite';
         $tempPath = storage_path('app/' . $fileName);
 
-        copy($dbPath, $tempPath);
+        if (config('database.default') === 'sqlite') {
+            $escapedTempPath = str_replace("'", "''", $tempPath);
+            DB::statement("VACUUM INTO '{$escapedTempPath}'");
+        } else {
+            copy($dbPath, $tempPath);
+        }
 
         $sizeKb = round(filesize($tempPath) / 1024, 1);
         $sizeMb = round($sizeKb / 1024, 2);
