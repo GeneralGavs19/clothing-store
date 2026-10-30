@@ -22,6 +22,7 @@ class SaleItem extends Model
         'is_on_order',
         'source_location',
         'variant_size',
+        'color',
         'purchase_price',
         'original_price',
         'discount_percent',

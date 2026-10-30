@@ -164,6 +164,7 @@ class SalesService
                     'is_on_order' => $isOnOrder,
                     'source_location' => $source,
                     'variant_size' => $variantLabel,
+                    'color' => $item['color'] ?? $variant?->color ?? $product?->color,
                     'purchase_price' => $purchase,
                     'original_price' => $originalPrice,
                     'discount_percent' => $itemDiscountPercent,
@@ -261,6 +262,7 @@ class SalesService
             'quantity' => 1,
             'source_location' => $source,
             'variant_size' => $variant->size,
+            'color' => $item['color'] ?? $variant?->color ?? $product?->color,
             'purchase_price' => $purchase,
             'original_price' => $originalPrice,
             'discount_percent' => $itemDiscountPercent,
@@ -996,6 +998,13 @@ class SalesService
                        ->orWhere('type', '');
                 });
             }
+            if ($color) {
+                $productQuery->where(function ($cq) use ($color) {
+                    $cq->whereRaw('LOWER(TRIM(color)) = ?', [mb_strtolower($color)])
+                       ->orWhereNull('color')
+                       ->orWhere('color', '');
+                });
+            }
             $product = $productQuery->lockForUpdate()->first();
 
             if (! $product) {
@@ -1025,12 +1034,18 @@ class SalesService
                 $product->save();
             }
 
-            // Check if variant exists (case-insensitive)
-            $variant = ProductVariant::query()
+            // Check if variant exists (case-insensitive by size and color)
+            $variantQuery = ProductVariant::query()
                 ->where('product_id', $product->id)
-                ->whereRaw('LOWER(TRIM(size)) = ?', [mb_strtolower($size)])
-                ->lockForUpdate()
-                ->first();
+                ->whereRaw('LOWER(TRIM(size)) = ?', [mb_strtolower($size)]);
+            if ($color) {
+                $variantQuery->where(function ($cq) use ($color) {
+                    $cq->whereRaw('LOWER(TRIM(color)) = ?', [mb_strtolower($color)])
+                       ->orWhereNull('color')
+                       ->orWhere('color', '');
+                });
+            }
+            $variant = $variantQuery->lockForUpdate()->first();
 
             if (! $variant) {
                 $category = $product->category_id ? Category::find($product->category_id) : null;
@@ -1039,7 +1054,7 @@ class SalesService
                 $variant = ProductVariant::create([
                     'product_id' => $product->id,
                     'size' => $size,
-                    'color' => $product->color,
+                    'color' => $color ?: $product->color,
                     'sku' => $sku,
                     'stock_warehouse' => 0,
                     'stock_store' => $remainingStock,
@@ -1049,6 +1064,10 @@ class SalesService
                     'position' => (int) $product->variants()->count(),
                 ]);
             } else {
+                if ($color && (empty($variant->color) || $variant->color === '—')) {
+                    $variant->color = $color;
+                    $variant->save();
+                }
                 if ($remainingStock > 0) {
                     $variant->stock_store = $remainingStock;
                     $variant->save();
@@ -1130,6 +1149,7 @@ class SalesService
                 'is_on_order' => $isOnOrder,
                 'source_location' => 'display',
                 'variant_size' => $variant->size,
+                'color' => $color ?: $variant->color ?: $product->color,
                 'purchase_price' => $finalPurchasePrice,
                 'original_price' => $inputOriginalPrice,
                 'discount_percent' => $discountPercent,
