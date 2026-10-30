@@ -4,21 +4,38 @@ import api from '../api/client'
 export const useSalesStore = defineStore('sales', {
   state: () => ({
     sales: [],
-    meta: { current_page: 1, last_page: 1, total: 0, per_page: 15 },
+    meta: { current_page: 1, last_page: 1, total: 0, per_page: 40 },
     pending: [],
     pendingMeta: { current_page: 1, last_page: 1, total: 0, per_page: 15 },
     loading: false,
+    loadingMore: false,
     loadingPending: false,
   }),
   actions: {
-    async fetch(params = {}) {
-      this.loading = true
+    async fetch(params = {}, append = false) {
+      if (append) {
+        this.loadingMore = true
+      } else {
+        this.loading = true
+      }
       try {
         const { data } = await api.get('/sales', { params })
-        this.sales = data.data
-        this.meta = data.meta
+        if (append) {
+          const existingIds = new Set(this.sales.map((s) => s.id))
+          const newItems = (data.data || []).filter((s) => !existingIds.has(s.id))
+          this.sales = [...this.sales, ...newItems]
+        } else {
+          this.sales = data.data || []
+        }
+        this.meta = data.meta || {
+          current_page: 1,
+          last_page: 1,
+          total: this.sales.length,
+          per_page: params.per_page || 40,
+        }
       } finally {
         this.loading = false
+        this.loadingMore = false
       }
     },
     async fetchPending(params = {}) {
@@ -53,7 +70,12 @@ export const useSalesStore = defineStore('sales', {
       return res
     },
     async deleteSale(id) {
-      return api.delete(`/sales/${id}`)
+      const res = await api.delete(`/sales/${id}`)
+      this.sales = this.sales.filter((s) => s.id !== id)
+      if (this.meta && this.meta.total > 0) {
+        this.meta.total--
+      }
+      return res
     },
     async updateSale(id, payload) {
       const res = await api.put(`/sales/${id}`, payload)

@@ -444,58 +444,94 @@
     <!-- ВИЗУАЛЬНЫЙ БЛОК: ДИНАМИКА ПРОДАЖ И ЛИДЕРЫ СПРОСА         -->
     <!-- ======================================================== -->
     <section class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      <!-- ГРАФИК ДИНАМИКИ ПРОДАЖ ПО ДНЯМ (2 КОЛОНКИ) -->
-      <div class="panel p-4 lg:col-span-2">
-        <div class="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800">
+      <!-- ГРАФИК И ТАБЛИЦА ДИНАМИКИ ПРОДАЖ ПО ДНЯМ (2 КОЛОНКИ) -->
+      <div class="panel p-4 lg:col-span-2 space-y-4">
+        <!-- Шапка: заголовок, переключатель метрик, легенда -->
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-3 dark:border-slate-800">
           <div>
             <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
               Динамика продаж по дням
             </h3>
             <p class="text-[11px] text-slate-400">
-              Выручка (₸) и количество проданных товаров в выбранном периоде
+              Выручка, средний чек, скидки и сравнение день-ко-дню (кликните день для чеков)
             </p>
           </div>
-          <div class="flex items-center gap-3 text-xs">
-            <span class="flex items-center gap-1.5 text-slate-500">
-              <span class="h-2.5 w-2.5 rounded-sm bg-emerald-500"></span>
-              В наличии
-            </span>
-            <span class="flex items-center gap-1.5 text-slate-500">
-              <span class="h-2.5 w-2.5 rounded-sm bg-amber-500"></span>
-              Под заказ
-            </span>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <!-- Переключатель метрики графиков -->
+            <div class="flex rounded-lg bg-slate-100 p-0.5 text-xs font-medium dark:bg-slate-800">
+              <button
+                type="button"
+                class="rounded-md px-2 py-1 text-[11px] transition"
+                :class="dynamicsMetric === 'revenue' ? 'bg-white text-slate-900 font-bold shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 hover:text-slate-900 dark:text-slate-400'"
+                @click="dynamicsMetric = 'revenue'"
+              >
+                Выручка (₸)
+              </button>
+              <button
+                type="button"
+                class="rounded-md px-2 py-1 text-[11px] transition"
+                :class="dynamicsMetric === 'sales_count' ? 'bg-white text-slate-900 font-bold shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 hover:text-slate-900 dark:text-slate-400'"
+                @click="dynamicsMetric = 'sales_count'"
+              >
+                Чеки
+              </button>
+              <button
+                type="button"
+                class="rounded-md px-2 py-1 text-[11px] transition"
+                :class="dynamicsMetric === 'units' ? 'bg-white text-slate-900 font-bold shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 hover:text-slate-900 dark:text-slate-400'"
+                @click="dynamicsMetric = 'units'"
+              >
+                Штуки
+              </button>
+            </div>
+
+            <!-- Легенда -->
+            <div class="flex items-center gap-2 text-[11px]">
+              <span class="flex items-center gap-1 text-slate-500">
+                <span class="h-2 w-2 rounded-sm bg-emerald-500"></span>
+                Наличие
+              </span>
+              <span class="flex items-center gap-1 text-slate-500">
+                <span class="h-2 w-2 rounded-sm bg-amber-500"></span>
+                Заказ
+              </span>
+            </div>
           </div>
         </div>
 
-        <!-- Столбчатый график -->
+        <!-- Столбчатый график с кликом по дню -->
         <div v-if="!salesDynamics.length" class="py-12 text-center text-xs text-slate-400">
           За выбранный период нет данных о динамике продаж
         </div>
 
-        <div v-else class="mt-4">
-          <div class="flex h-44 items-end gap-1 overflow-x-auto pb-1 pt-6">
+        <div v-else class="mt-2">
+          <div class="flex h-44 items-end gap-1 overflow-x-auto pb-1 pt-6 px-1">
             <div
               v-for="d in salesDynamics"
               :key="d.date"
-              class="group relative flex flex-1 min-w-[28px] flex-col items-center justify-end h-full"
+              class="group relative flex flex-1 min-w-[28px] max-w-[42px] flex-col items-center justify-end h-full cursor-pointer"
+              @click="openDayDetails(d.date)"
             >
               <!-- Тултип при наведении -->
-              <div class="pointer-events-none absolute -top-12 z-20 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[10px] text-white shadow-lg group-hover:block dark:bg-slate-800">
-                <div class="font-bold">{{ d.day_label }}</div>
-                <div>{{ formatMoney(d.revenue) }} · {{ d.units }} шт.</div>
+              <div class="pointer-events-none absolute -top-16 z-20 hidden -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1.5 text-[10px] text-white shadow-xl group-hover:block dark:bg-slate-800 border border-slate-700">
+                <div class="font-bold text-slate-200">{{ d.date }} ({{ d.day_name }})</div>
+                <div class="font-bold text-emerald-400">{{ formatMoney(d.revenue) }}</div>
+                <div class="text-slate-300">{{ d.sales_count }} чеков · {{ d.units }} шт.</div>
+                <div class="text-amber-300" v-if="d.average_check > 0">Ср. чек: {{ formatMoney(d.average_check) }}</div>
+                <div class="text-[9px] text-slate-400 pt-0.5">Кликните для деталей дня</div>
               </div>
 
-              <!-- Составной столбец (В наличии + Под заказ) -->
+              <!-- Составной столбец -->
               <div
-                class="w-full max-w-[24px] rounded-t transition-all flex flex-col justify-end"
-                :style="{ height: getBarHeight(d.revenue) }"
+                class="w-full rounded-t transition-all flex flex-col justify-end group-hover:opacity-85"
+                :style="{ height: getBarHeight(d) }"
               >
                 <!-- Доля под заказ -->
                 <div
                   v-if="d.on_order_units > 0"
                   class="w-full bg-amber-500 rounded-t"
                   :style="{ height: `${(d.on_order_units / (d.units || 1)) * 100}%` }"
-                  title="Под заказ"
                 ></div>
                 <!-- Доля из наличия -->
                 <div
@@ -503,15 +539,102 @@
                   class="w-full bg-emerald-500"
                   :class="{ 'rounded-t': d.on_order_units === 0 }"
                   :style="{ height: `${(d.in_stock_units / (d.units || 1)) * 100}%` }"
-                  title="Из наличия"
+                ></div>
+                <!-- Пустой столбец с нулевыми продажами -->
+                <div
+                  v-if="d.units === 0"
+                  class="w-full h-1 bg-slate-200 dark:bg-slate-700 rounded-t"
                 ></div>
               </div>
 
               <!-- Подпись даты снизу -->
-              <span class="mt-1.5 truncate text-[10px] text-slate-400">
+              <span class="mt-1.5 text-[10px] text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white font-medium">
                 {{ d.day_label }}
               </span>
             </div>
+          </div>
+        </div>
+
+        <!-- ИНТЕРАКТИВНАЯ ТАБЛИЦА ПО ДНЯМ -->
+        <div v-if="salesDynamics.length" class="border-t border-slate-100 pt-3 dark:border-slate-800">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-slate-700 dark:text-slate-300">
+              Таблица показателей по дням (кликните строку для просмотра чеков):
+            </span>
+            <span class="text-[11px] text-slate-400">
+              Всего дней: {{ salesDynamics.length }}
+            </span>
+          </div>
+
+          <div class="max-h-60 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800">
+            <table class="w-full text-left text-xs">
+              <thead class="sticky top-0 bg-slate-50 text-[11px] font-bold text-slate-600 dark:bg-slate-900 dark:text-slate-300 border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th class="px-2.5 py-2">Дата</th>
+                  <th class="px-2 py-2 text-center">День</th>
+                  <th class="px-2.5 py-2 text-center">Чеков</th>
+                  <th class="px-2.5 py-2 text-right">Выручка</th>
+                  <th class="px-2.5 py-2 text-center">Штук</th>
+                  <th class="px-2.5 py-2 text-right">Ср. чек</th>
+                  <th class="px-2.5 py-2 text-right">Скидки</th>
+                  <th class="px-2.5 py-2 text-center">Динамика</th>
+                  <th class="px-2 py-2 text-center"></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                <tr
+                  v-for="d in [...salesDynamics].reverse()"
+                  :key="d.date"
+                  class="cursor-pointer transition hover:bg-emerald-50/60 dark:hover:bg-slate-800/60"
+                  @click="openDayDetails(d.date)"
+                >
+                  <td class="px-2.5 py-1.5 font-bold text-slate-900 dark:text-white">
+                    {{ d.date }}
+                  </td>
+                  <td class="px-2 py-1.5 text-center text-slate-500 font-medium">
+                    {{ d.day_name }}
+                  </td>
+                  <td class="px-2.5 py-1.5 text-center font-semibold">
+                    {{ d.sales_count }}
+                  </td>
+                  <td class="px-2.5 py-1.5 text-right font-black tabular-nums text-slate-900 dark:text-white">
+                    {{ formatMoney(d.revenue) }}
+                  </td>
+                  <td class="px-2.5 py-1.5 text-center">
+                    <span class="font-bold">{{ d.units }}</span>
+                    <span v-if="d.on_order_units > 0" class="text-[10px] text-amber-600 dark:text-amber-400 ml-1">
+                      ({{ d.on_order_units }} заказ)
+                    </span>
+                  </td>
+                  <td class="px-2.5 py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-400">
+                    {{ d.average_check > 0 ? formatMoney(d.average_check) : '—' }}
+                  </td>
+                  <td class="px-2.5 py-1.5 text-right tabular-nums text-slate-500">
+                    {{ d.discount_amount > 0 ? formatMoney(d.discount_amount) : '—' }}
+                  </td>
+                  <td class="px-2.5 py-1.5 text-center">
+                    <span
+                      v-if="d.revenue_diff_percent !== null && d.revenue_diff_percent !== undefined"
+                      class="inline-block rounded px-1.5 py-0.5 text-[10px] font-bold"
+                      :class="d.revenue_diff >= 0 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'"
+                    >
+                      {{ d.revenue_diff >= 0 ? '+' : '' }}{{ d.revenue_diff_percent }}%
+                    </span>
+                    <span v-else class="text-slate-400 text-[10px]">—</span>
+                  </td>
+                  <td class="px-2 py-1.5 text-center">
+                    <button
+                      type="button"
+                      class="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 text-xs font-semibold p-1"
+                      title="Посмотреть чеки за этот день"
+                      @click.stop="openDayDetails(d.date)"
+                    >
+                      <Eye class="h-3.5 w-3.5" />
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -1094,6 +1217,182 @@
         </div>
       </div>
     </section>
+
+    <!-- ======================================================== -->
+    <!-- МОДАЛЬНОЕ ОКНО: ДЕТАЛИЗАЦИЯ ДНЯ (ЧЕКИ И ПРОДАЖИ)          -->
+    <!-- ======================================================== -->
+    <div
+      v-if="selectedDayDetails"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      @click.self="closeDayDetails"
+    >
+      <div
+        class="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+      >
+        <!-- Шапка модалки -->
+        <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+          <div class="flex items-center gap-3">
+            <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
+              <Calendar class="h-5 w-5" />
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="text-base font-bold text-slate-900 dark:text-white">
+                  Продажи за {{ selectedDayDetails.formatted_date || selectedDayDetails.date }}
+                </h3>
+                <span class="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  {{ selectedDayDetails.day_name }}
+                </span>
+              </div>
+              <p class="text-xs text-slate-500 dark:text-slate-400">
+                Детальный список всех оформленных чеков и проданных товаров за выбранный день
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200 transition"
+            @click="closeDayDetails"
+          >
+            <X class="h-5 w-5" />
+          </button>
+        </div>
+
+        <!-- Сводная карточка дня -->
+        <div class="grid grid-cols-2 gap-3 border-b border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/40 sm:grid-cols-4">
+          <div class="rounded-xl border border-slate-200/80 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+            <span class="text-[11px] font-medium text-slate-500">Выручка за день</span>
+            <div class="text-lg font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
+              {{ formatMoney(selectedDayDetails.summary?.revenue || 0) }}
+            </div>
+          </div>
+          <div class="rounded-xl border border-slate-200/80 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+            <span class="text-[11px] font-medium text-slate-500">Чеков оформлено</span>
+            <div class="text-lg font-black text-slate-900 dark:text-white tabular-nums">
+              {{ selectedDayDetails.summary?.sales_count || 0 }}
+            </div>
+          </div>
+          <div class="rounded-xl border border-slate-200/80 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+            <span class="text-[11px] font-medium text-slate-500">Товаров продано</span>
+            <div class="text-lg font-black text-slate-900 dark:text-white tabular-nums">
+              {{ selectedDayDetails.summary?.units || 0 }} шт.
+              <span class="text-xs font-normal text-slate-400">
+                ({{ selectedDayDetails.summary?.in_stock_units || 0 }} нал / {{ selectedDayDetails.summary?.on_order_units || 0 }} зак)
+              </span>
+            </div>
+          </div>
+          <div class="rounded-xl border border-slate-200/80 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+            <span class="text-[11px] font-medium text-slate-500">Средний чек</span>
+            <div class="text-lg font-black text-indigo-600 dark:text-indigo-400 tabular-nums">
+              {{ formatMoney(selectedDayDetails.summary?.average_check || 0) }}
+            </div>
+          </div>
+        </div>
+
+        <!-- Контент: Список чеков -->
+        <div class="flex-1 overflow-y-auto p-4 space-y-3">
+          <div
+            v-if="!selectedDayDetails.sales || !selectedDayDetails.sales.length"
+            class="py-12 text-center text-sm text-slate-400"
+          >
+            За этот день нет оформленных чеков
+          </div>
+
+          <div
+            v-for="sale in selectedDayDetails.sales"
+            :key="sale.id"
+            class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
+          >
+            <!-- Верхняя строка чека -->
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5 dark:border-slate-800">
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-slate-900 dark:text-white text-sm">
+                  {{ sale.sale_number || `Чек #${sale.id}` }}
+                </span>
+                <span class="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                  <Clock class="h-3 w-3 text-slate-400" />
+                  {{ sale.time }}
+                </span>
+                <span
+                  class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                  :class="sale.is_on_order ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'"
+                >
+                  {{ sale.is_on_order ? '📦 Под заказ' : '✓ В наличии' }}
+                </span>
+                <span
+                  v-if="sale.cashier_name"
+                  class="text-xs text-slate-500"
+                >
+                  Кассир: <strong class="text-slate-700 dark:text-slate-300">{{ sale.cashier_name }}</strong>
+                </span>
+              </div>
+
+              <div class="text-right">
+                <span class="text-base font-black text-slate-900 dark:text-white tabular-nums">
+                  {{ formatMoney(sale.total) }}
+                </span>
+                <span v-if="sale.discount_amount > 0" class="ml-1 text-xs text-rose-500 font-semibold tabular-nums">
+                  (-{{ formatMoney(sale.discount_amount) }})
+                </span>
+              </div>
+            </div>
+
+            <!-- Список товаров в чеке -->
+            <div class="mt-2.5 space-y-1.5">
+              <div
+                v-for="item in sale.items"
+                :key="item.id"
+                class="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-slate-50/70 dark:bg-slate-800/40"
+              >
+                <div class="flex items-center gap-2">
+                  <span class="font-medium text-slate-800 dark:text-slate-200">
+                    {{ item.product_name }}
+                  </span>
+                  <!-- Размер (не показываем для шапок!) -->
+                  <span
+                    v-if="!item.is_hat && item.size"
+                    class="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                  >
+                    {{ item.size }}
+                  </span>
+                  <span
+                    v-if="item.is_on_order"
+                    class="text-[10px] text-amber-600 dark:text-amber-400 font-semibold"
+                  >
+                    (заказ)
+                  </span>
+                </div>
+
+                <div class="flex items-center gap-3">
+                  <span class="text-slate-500">
+                    {{ item.quantity }} шт. × {{ formatMoney(item.price) }}
+                  </span>
+                  <span class="font-bold text-slate-900 dark:text-white tabular-nums">
+                    {{ formatMoney(item.line_total) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Примечание к чеку, если есть -->
+            <div v-if="sale.notes" class="mt-2 text-[11px] text-slate-400 italic">
+              «{{ sale.notes }}»
+            </div>
+          </div>
+        </div>
+
+        <!-- Подвал модалки -->
+        <div class="border-t border-slate-200 p-4 text-right dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+          <button
+            type="button"
+            class="rounded-xl bg-slate-200 px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 transition"
+            @click="closeDayDetails"
+          >
+            Закрыть
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1101,8 +1400,11 @@
 import { computed, onMounted, ref } from 'vue'
 import {
   BarChart3,
+  Calendar,
   ChevronDown,
+  Clock,
   DatabaseBackup,
+  Eye,
   FileSpreadsheet,
   Layers,
   MoreVertical,
@@ -1126,8 +1428,12 @@ const loading = ref(false)
 const exportingExcel = ref(false)
 const showMoreActions = ref(false)
 
+const dynamicsMetric = ref('revenue') // 'revenue' | 'sales_count' | 'units'
+const selectedDayDetails = ref(null)
+const loadingDayDetails = ref(false)
+
 const activeTab = ref('types') // 'types' | 'products' | 'categories' | 'cashiers'
-const activePeriod = ref('month') // 'all' | 'today' | '7days' | 'month' | 'custom'
+const activePeriod = ref('month') // 'all' | 'today' | 'yesterday' | '7days' | '30days' | 'month' | 'custom'
 const orderTypeFilter = ref('') // '' (все) | 'in_stock' | 'on_order'
 const categoryFilter = ref(null) // ID категории или null
 const selectedType = ref('') // Вид товара ('Поло', 'Брюки'...)
@@ -1163,7 +1469,9 @@ const analyticsData = ref({
 
 const periodPresets = [
   { key: 'today', label: 'Сегодня' },
+  { key: 'yesterday', label: 'Вчера' },
   { key: '7days', label: '7 дней' },
+  { key: '30days', label: '30 дней' },
   { key: 'month', label: 'Этот месяц' },
   { key: 'all', label: 'Все время' },
   { key: 'custom', label: 'Свой период' },
@@ -1181,7 +1489,7 @@ const byCashier = computed(() => analyticsData.value?.by_cashier || [])
 const availableTypes = computed(() => {
   const serverTypes = analyticsData.value?.available_types || []
   if (serverTypes.length) return serverTypes
-  const defaults = ['Поло', 'Брюки', 'Юбка', 'Рубашка', 'Жилет', 'Пиджак', 'Сарафан', 'Блузка', 'Шорты', 'Платье', 'Галстук']
+  const defaults = ['Поло', 'Брюки', 'Юбка', 'Рубашка', 'Жилет', 'Пиджак', 'Сарафан', 'Блузка', 'Шорты', 'Платье', 'Галстук', 'Шапки']
   const fromData = byType.value.map((t) => t.type)
   return Array.from(new Set([...defaults, ...fromData])).filter(Boolean)
 })
@@ -1355,10 +1663,40 @@ const sortedCashiers = computed(() => {
   })
 })
 
-function getBarHeight(revenue) {
-  const max = Math.max(...salesDynamics.value.map((d) => d.revenue || 0), 1)
-  const ratio = (revenue || 0) / max
-  return `${Math.max(6, Math.round(ratio * 100))}%`
+function getBarHeight(d) {
+  if (!salesDynamics.value.length) return '0%'
+  let val = 0
+  let max = 1
+  if (dynamicsMetric.value === 'sales_count') {
+    val = d.sales_count || 0
+    max = Math.max(...salesDynamics.value.map((item) => item.sales_count || 0), 1)
+  } else if (dynamicsMetric.value === 'units') {
+    val = d.units || 0
+    max = Math.max(...salesDynamics.value.map((item) => item.units || 0), 1)
+  } else {
+    val = d.revenue || 0
+    max = Math.max(...salesDynamics.value.map((item) => item.revenue || 0), 1)
+  }
+  if (val === 0) return '4px'
+  const ratio = val / max
+  return `${Math.max(8, Math.round(ratio * 100))}%`
+}
+
+async function openDayDetails(date) {
+  if (!date) return
+  loadingDayDetails.value = true
+  try {
+    const { data } = await api.get('/reports/day-details', { params: { date } })
+    selectedDayDetails.value = data
+  } catch (error) {
+    toast.push(apiError(error), 'error')
+  } finally {
+    loadingDayDetails.value = false
+  }
+}
+
+function closeDayDetails() {
+  selectedDayDetails.value = null
 }
 
 function setPeriod(period) {
@@ -1369,9 +1707,20 @@ function setPeriod(period) {
     const d = today.toISOString().split('T')[0]
     customDateFrom.value = d
     customDateTo.value = d
+  } else if (period === 'yesterday') {
+    const yest = new Date(today)
+    yest.setDate(yest.getDate() - 1)
+    const d = yest.toISOString().split('T')[0]
+    customDateFrom.value = d
+    customDateTo.value = d
   } else if (period === '7days') {
     const past = new Date(today)
     past.setDate(past.getDate() - 6)
+    customDateFrom.value = past.toISOString().split('T')[0]
+    customDateTo.value = today.toISOString().split('T')[0]
+  } else if (period === '30days') {
+    const past = new Date(today)
+    past.setDate(past.getDate() - 29)
     customDateFrom.value = past.toISOString().split('T')[0]
     customDateTo.value = today.toISOString().split('T')[0]
   } else if (period === 'month') {

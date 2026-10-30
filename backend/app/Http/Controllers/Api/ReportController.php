@@ -13,6 +13,7 @@ use App\Models\StockMovement;
 use App\Models\User;
 use App\Services\ActivityLogger;
 use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -129,44 +130,45 @@ class ReportController extends Controller
         $sheet->setCellValue('A2', "Магазин детской одежды и школьной формы · {$periodText} · Сформирован: " . now()->format('d.m.Y H:i'));
         $sheet->getStyle('A2')->getFont()->setItalic(true)->setSize(10)->getColor()->setRGB('64748B');
 
-        // Сводные карточки KPI сверху таблицы (строки 4 и 5)
+        // Сводные динамические карточки KPI сверху таблицы (строки 4 и 5)
+        // Используем формулы SUBTOTAL(109, ...) и SUBTOTAL(103, ...), чтобы при фильтрации пользователем
+        // в Excel карточки и суммы динамически пересчитывались исключительно по видимым строкам!
         $sheet->mergeCells('A4:B4');
         $sheet->setCellValue('A4', 'ПРОДАНО ВЕЩЕЙ');
         $sheet->mergeCells('A5:B5');
-        $sheet->setCellValue('A5', $totalSoldQty . ' шт.');
 
         $sheet->mergeCells('C4:E4');
         $sheet->setCellValue('C4', 'ОБЩАЯ ВЫРУЧКА');
         $sheet->mergeCells('C5:E5');
-        $sheet->setCellValue('C5', number_format($totalRevenue, 0, '.', ' ') . ' ₸');
 
         $sheet->mergeCells('F4:H4');
-        $sheet->setCellValue('F4', '✓ ИЗ НАЛИЧИЯ');
+        $sheet->setCellValue('F4', 'СУММА СКИДОК');
         $sheet->mergeCells('F5:H5');
-        $sheet->setCellValue('F5', $inStockQty . ' шт. · ' . number_format($inStockRev, 0, '.', ' ') . ' ₸');
 
         $sheet->mergeCells('I4:K4');
-        $sheet->setCellValue('I4', '📦 НА ЗАКАЗ');
+        $sheet->setCellValue('I4', 'СЕБЕСТОИМОСТЬ');
         $sheet->mergeCells('I5:K5');
-        $sheet->setCellValue('I5', $onOrderQty . ' шт. · ' . number_format($onOrderRev, 0, '.', ' ') . ' ₸');
 
         $sheet->mergeCells('L4:N4');
-        $sheet->setCellValue('L4', 'ЧЕКОВ / СРЕДНИЙ ЧЕК');
+        $sheet->setCellValue('L4', 'СРЕДНЯЯ ЦЕНА ВЕЩИ');
         $sheet->mergeCells('L5:N5');
-        $sheet->setCellValue('L5', $totalSalesCount . ' чеков · ' . number_format($averageCheck, 0, '.', ' ') . ' ₸');
+
+        $sheet->mergeCells('O4:Q4');
+        $sheet->setCellValue('O4', 'ЧИСЛО ПОЗИЦИЙ');
+        $sheet->mergeCells('O5:Q5');
 
         // Стилизация KPI карточек
-        $sheet->getStyle('A4:N4')->applyFromArray([
+        $sheet->getStyle('A4:Q4')->applyFromArray([
             'font' => ['bold' => true, 'size' => 9, 'color' => ['rgb' => '475569']],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F1F5F9']],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
         ]);
-        $sheet->getStyle('A5:N5')->applyFromArray([
+        $sheet->getStyle('A5:Q5')->applyFromArray([
             'font' => ['bold' => true, 'size' => 12, 'color' => ['rgb' => '0F172A']],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F8FAFC']],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
         ]);
-        $sheet->getStyle('A4:N5')->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('CBD5E1');
+        $sheet->getStyle('A4:Q5')->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('CBD5E1');
 
         // Заголовки таблицы (строка 7)
         $headers1 = [
@@ -179,7 +181,10 @@ class ReportController extends Controller
             'Размер',
             'Цвет',
             'Кол-во (шт.)',
-            'Цена за шт., ₸',
+            'Исходная цена, ₸',
+            'Скидка, ₸',
+            'Себестоимость, ₸',
+            'Цена продажи, ₸',
             'Общая цена продажи, ₸',
             'Кассир',
             'Примечание',
@@ -187,7 +192,7 @@ class ReportController extends Controller
         ];
         $sheet->fromArray($headers1, null, 'A7');
         $sheet->getRowDimension(7)->setRowHeight(26);
-        $sheet->getStyle('A7:N7')->applyFromArray([
+        $sheet->getStyle('A7:Q7')->applyFromArray([
             'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 10],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '059669']], // Изумрудно-зеленый
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER, 'wrapText' => true],
@@ -196,7 +201,7 @@ class ReportController extends Controller
         $r = 8;
         foreach ($sales as $sale) {
             $saleIsOnOrder = (bool) $sale->is_on_order;
-            $dateStr = ($sale->approved_at ?? $sale->created_at)?->format('d.m.Y H:i') ?? '—';
+            $dateStr = ($sale->approved_at ?? $sale->created_at)?->timezone('Asia/Almaty')->format('d.m.Y H:i') ?? '—';
             $statusLabel = match ($sale->status) {
                 'approved' => 'Оформлен',
                 'rejected' => 'Отменён',
@@ -215,6 +220,9 @@ class ReportController extends Controller
                     '—',
                     '—',
                     0,
+                    (float) $sale->subtotal,
+                    0.0,
+                    0.0,
                     (float) $sale->subtotal,
                     (float) $sale->subtotal,
                     $sale->cashier?->name ?? '—',
@@ -237,7 +245,8 @@ class ReportController extends Controller
                 );
                 $catName = $item->product?->category?->name ?: '—';
                 $color = $item->product?->color ?: '—';
-                $size = $item->variant_size ?: '—';
+                $isHat = $this->isHatTypeOrName($prodType, $prodName);
+                $size = $isHat ? '—' : ($item->variant_size ?: '—');
 
                 if ($typeFilter && mb_stripos($prodType, $typeFilter) === false && mb_stripos($prodName, $typeFilter) === false) {
                     continue;
@@ -247,8 +256,11 @@ class ReportController extends Controller
                 }
 
                 $qty = (int) $item->quantity;
-                $price = (float) $item->sale_price;
-                $total = (float) $item->line_total;
+                $salePrice = (float) $item->sale_price;
+                $discAmount = (float) ($item->discount_amount ?: 0);
+                $origPrice = (float) ($item->original_price ?: ($salePrice + $discAmount));
+                $purchasePrice = (float) ($item->purchase_price ?: $item->productVariant?->purchase_price ?: $item->product?->purchase_price ?: 0);
+                $lineTotal = (float) $item->line_total;
 
                 $sheet->fromArray([
                     $saleNum,
@@ -260,8 +272,11 @@ class ReportController extends Controller
                     $size,
                     $color,
                     $qty,
-                    $price,
-                    $total,
+                    $origPrice,
+                    $discAmount,
+                    $purchasePrice,
+                    $salePrice,
+                    $lineTotal,
                     $sale->cashier?->name ?? '—',
                     $sale->cashier_note ?? '—',
                     $statusLabel,
@@ -269,7 +284,7 @@ class ReportController extends Controller
 
                 // Чередование строк (зебра) для удобства чтения
                 if ($r % 2 === 0) {
-                    $sheet->getStyle("A{$r}:N{$r}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F8FAFC');
+                    $sheet->getStyle("A{$r}:Q{$r}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F8FAFC');
                 }
 
                 $r++;
@@ -278,18 +293,36 @@ class ReportController extends Controller
 
         $dataEndRow = max(8, $r - 1);
 
-        // Строка ИТОГО
+        // Динамические формулы в карточки KPI (пересчитываются при применении любого фильтра!)
+        $sheet->setCellValue('A5', "=SUBTOTAL(109, I8:I{$dataEndRow})");
+        $sheet->setCellValue('C5', "=SUBTOTAL(109, N8:N{$dataEndRow})");
+        $sheet->setCellValue('F5', "=SUBTOTAL(109, K8:K{$dataEndRow})");
+        $sheet->setCellValue('I5', "=SUBTOTAL(109, L8:L{$dataEndRow})");
+        $sheet->setCellValue('L5', "=SUBTOTAL(101, M8:M{$dataEndRow})");
+        $sheet->setCellValue('O5', "=SUBTOTAL(103, A8:A{$dataEndRow})");
+
+        $sheet->getStyle('A5')->getNumberFormat()->setFormatCode('#,##0 "шт."');
+        $sheet->getStyle('C5')->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle('F5')->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle('I5')->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle('L5')->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle('O5')->getNumberFormat()->setFormatCode('#,##0 "поз."');
+
+        // Строка ИТОГО с формулами SUBTOTAL(109, ...)
         $totalRow = $r;
         $sheet->mergeCells("A{$totalRow}:H{$totalRow}");
-        $sheet->setCellValue("A{$totalRow}", 'ИТОГО ПО ВСЕМ ПРОДАЖАМ:');
-        $sheet->setCellValue("I{$totalRow}", "=SUM(I8:I{$dataEndRow})");
+        $sheet->setCellValue("A{$totalRow}", 'ИТОГО ПО ФИЛЬТРУ:');
+        $sheet->setCellValue("I{$totalRow}", "=SUBTOTAL(109, I8:I{$dataEndRow})");
         $sheet->setCellValue("J{$totalRow}", '—');
-        $sheet->setCellValue("K{$totalRow}", "=SUM(K8:K{$dataEndRow})");
-        $sheet->setCellValue("L{$totalRow}", '');
-        $sheet->setCellValue("M{$totalRow}", '');
-        $sheet->setCellValue("N{$totalRow}", '');
+        $sheet->setCellValue("K{$totalRow}", "=SUBTOTAL(109, K8:K{$dataEndRow})");
+        $sheet->setCellValue("L{$totalRow}", "=SUBTOTAL(109, L8:L{$dataEndRow})");
+        $sheet->setCellValue("M{$totalRow}", '—');
+        $sheet->setCellValue("N{$totalRow}", "=SUBTOTAL(109, N8:N{$dataEndRow})");
+        $sheet->setCellValue("O{$totalRow}", '');
+        $sheet->setCellValue("P{$totalRow}", '');
+        $sheet->setCellValue("Q{$totalRow}", '');
 
-        $sheet->getStyle("A{$totalRow}:N{$totalRow}")->applyFromArray([
+        $sheet->getStyle("A{$totalRow}:Q{$totalRow}")->applyFromArray([
             'font' => ['bold' => true, 'size' => 11, 'color' => ['rgb' => '000000']],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E2E8F0']],
             'borders' => [
@@ -299,9 +332,9 @@ class ReportController extends Controller
         ]);
         $sheet->getStyle("A{$totalRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
         $sheet->getStyle("I{$totalRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle("K{$totalRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+        $sheet->getStyle("N{$totalRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
 
-        $sheet->getStyle("A8:N{$dataEndRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('E2E8F0');
+        $sheet->getStyle("A8:Q{$dataEndRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('E2E8F0');
         $sheet->getStyle("A8:A{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
         $sheet->getStyle("B8:B{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
         $sheet->getStyle("C8:C{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
@@ -309,19 +342,22 @@ class ReportController extends Controller
         $sheet->getStyle("G8:G{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
         $sheet->getStyle("H8:H{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
         $sheet->getStyle("I8:I{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle("N8:N{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("Q8:Q{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        // Числовой формат тенге: [$₸-43F] исключает подмену на рубли Excel-ем
+        // Числовые форматы тенге
         $sheet->getStyle("I8:I{$totalRow}")->getNumberFormat()->setFormatCode('#,##0');
         $sheet->getStyle("J8:J{$dataEndRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
         $sheet->getStyle("K8:K{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle("L8:L{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle("M8:M{$dataEndRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle("N8:N{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
 
-        // Автофильтр (выпадающие списки фильтров по каждому столбцу, как в реальных таблицах)
-        $sheet->setAutoFilter("A7:N{$dataEndRow}");
-        // Закрепление верхней панели (заголовки и карточки остаются при прокрутке)
+        // Автофильтр по всем колонкам
+        $sheet->setAutoFilter("A7:Q{$dataEndRow}");
+        // Закрепление верхней панели
         $sheet->freezePane('A8');
 
-        foreach (range('A', 'N') as $col) {
+        foreach (range('A', 'Q') as $col) {
             $sheet->getColumnDimension($col)->setAutoSize(true);
         }
 
@@ -446,11 +482,11 @@ class ReportController extends Controller
         $totalRow2 = $r2;
 
         $sheet2->mergeCells("A{$totalRow2}:B{$totalRow2}");
-        $sheet2->setCellValue("A{$totalRow2}", 'ИТОГО:');
-        $sheet2->setCellValue("C{$totalRow2}", "=SUM(C5:C{$end2})");
-        $sheet2->setCellValue("D{$totalRow2}", "=SUM(D5:D{$end2})");
-        $sheet2->setCellValue("E{$totalRow2}", "=SUM(E5:E{$end2})");
-        $sheet2->setCellValue("F{$totalRow2}", "=SUM(F5:F{$end2})");
+        $sheet2->setCellValue("A{$totalRow2}", 'ИТОГО ПО ФИЛЬТРУ:');
+        $sheet2->setCellValue("C{$totalRow2}", "=SUBTOTAL(109, C5:C{$end2})");
+        $sheet2->setCellValue("D{$totalRow2}", "=SUBTOTAL(109, D5:D{$end2})");
+        $sheet2->setCellValue("E{$totalRow2}", "=SUBTOTAL(109, E5:E{$end2})");
+        $sheet2->setCellValue("F{$totalRow2}", "=SUBTOTAL(109, F5:F{$end2})");
         $sheet2->setCellValue("G{$totalRow2}", '—');
         $sheet2->setCellValue("H{$totalRow2}", '100%');
 
@@ -509,7 +545,7 @@ class ReportController extends Controller
         $r3 = 4;
         foreach ($sales as $sale) {
             $orderType = $sale->is_on_order ? '📦 На заказ' : 'В наличии';
-            $dateStr = ($sale->approved_at ?? $sale->created_at)?->format('d.m.Y H:i') ?? '—';
+            $dateStr = ($sale->approved_at ?? $sale->created_at)?->timezone('Asia/Almaty')->format('d.m.Y H:i') ?? '—';
             $statusLabel = match ($sale->status) {
                 'approved' => 'Оформлен',
                 'rejected' => 'Отменён',
@@ -519,7 +555,8 @@ class ReportController extends Controller
 
             $itemsSummary = $sale->items->map(function ($it) {
                 $name = $it->product_name ?: $it->product?->name ?: 'Товар';
-                $sz = $it->variant_size ? " ({$it->variant_size})" : '';
+                $isHat = $this->isHatTypeOrName($it->product_type ?: $it->product?->type, $name);
+                $sz = ($it->variant_size && $it->variant_size !== '—' && ! $isHat) ? " ({$it->variant_size})" : '';
                 return "{$name}{$sz} × {$it->quantity} шт.";
             })->implode(', ');
 
@@ -549,9 +586,9 @@ class ReportController extends Controller
         $totalRow3 = $r3;
 
         $sheet3->mergeCells("A{$totalRow3}:D{$totalRow3}");
-        $sheet3->setCellValue("A{$totalRow3}", 'ИТОГО ПО ВСЕМ ЧЕКАМ:');
-        $sheet3->setCellValue("E{$totalRow3}", "=SUM(E4:E{$end3})");
-        $sheet3->setCellValue("F{$totalRow3}", "=SUM(F4:F{$end3})");
+        $sheet3->setCellValue("A{$totalRow3}", 'ИТОГО ПО ФИЛЬТРУ:');
+        $sheet3->setCellValue("E{$totalRow3}", "=SUBTOTAL(109, E4:E{$end3})");
+        $sheet3->setCellValue("F{$totalRow3}", "=SUBTOTAL(109, F4:F{$end3})");
 
         $sheet3->getStyle("A{$totalRow3}:I{$totalRow3}")->applyFromArray([
             'font' => ['bold' => true, 'size' => 11, 'color' => ['rgb' => '000000']],
@@ -573,6 +610,138 @@ class ReportController extends Controller
 
         foreach (range('A', 'I') as $col) {
             $sheet3->getColumnDimension($col)->setAutoSize(true);
+        }
+
+        // ==========================================
+        // ЛИСТ 4: СВОДНАЯ АНАЛИТИКА (ГЛАВНЫЕ KPI, ДНИ, КАТЕГОРИИ)
+        // ==========================================
+        $sheet4 = $spreadsheet->createSheet();
+        $sheet4->setTitle('Сводная аналитика');
+        $sheet4->setShowGridlines(true);
+
+        $sheet4->setCellValue('A1', 'СВОДНЫЙ АНАЛИТИЧЕСКИЙ ОТЧЕТ');
+        $sheet4->getStyle('A1')->getFont()->setBold(true)->setSize(14)->getColor()->setRGB('1E293B');
+        $sheet4->setCellValue('A2', "Магазин детской одежды и школьной формы · {$periodText} · Сформирован: " . now()->format('d.m.Y H:i'));
+        $sheet4->getStyle('A2')->getFont()->setItalic(true)->setSize(10)->getColor()->setRGB('64748B');
+
+        // Таблица 1: Главные KPI показатели бизнеса
+        $sheet4->setCellValue('A4', 'КЛЮЧЕВЫЕ ПОКАЗАТЕЛИ БИЗНЕСА');
+        $sheet4->mergeCells('A4:D4');
+        $sheet4->getStyle('A4:D4')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 11],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1E293B']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+
+        $kpis = [
+            ['Показатель', 'Значение'],
+            ['Всего оформлено чеков', $totalSalesCount . ' чеков'],
+            ['Общая выручка от продаж', number_format($totalRevenue, 0, '.', ' ') . ' ₸'],
+            ['Всего продано единиц одежды', $totalSoldQty . ' шт.'],
+            ['Средний чек покупки', number_format($averageCheck, 0, '.', ' ') . ' ₸'],
+            ['Продажи из наличия (магазин)', $inStockQty . ' шт. · ' . number_format($inStockRev, 0, '.', ' ') . ' ₸'],
+            ['Продажи под заказ (пошив)', $onOrderQty . ' шт. · ' . number_format($onOrderRev, 0, '.', ' ') . ' ₸'],
+        ];
+
+        $r4 = 5;
+        foreach ($kpis as $idxKpi => $kpiRow) {
+            $sheet4->setCellValue('A' . $r4, $kpiRow[0]);
+            $sheet4->mergeCells("B{$r4}:D{$r4}");
+            $sheet4->setCellValue('B' . $r4, $kpiRow[1]);
+            if ($idxKpi === 0) {
+                $sheet4->getStyle("A{$r4}:D{$r4}")->applyFromArray([
+                    'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 10],
+                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '475569']],
+                ]);
+            } elseif ($r4 % 2 === 0) {
+                $sheet4->getStyle("A{$r4}:D{$r4}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F8FAFC');
+            }
+            $r4++;
+        }
+        $sheet4->getStyle('A5:D' . ($r4 - 1))->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('CBD5E1');
+        $sheet4->getStyle('A5:A' . ($r4 - 1))->getFont()->setBold(true);
+
+        // Таблица 2: Сводка по дням
+        $r4 += 2;
+        $sheet4->setCellValue('A' . $r4, 'ДИНАМИКА ПРОДАЖ ПО ДНЯМ');
+        $sheet4->mergeCells("A{$r4}:G{$r4}");
+        $sheet4->getStyle("A{$r4}:G{$r4}")->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 11],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '059669']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+        $r4++;
+
+        $dayHeaders = ['Дата', 'День недели', 'Чеков', 'Выручка, ₸', 'Продано, шт.', 'В наличии', 'Под заказ'];
+        $sheet4->fromArray($dayHeaders, null, 'A' . $r4);
+        $sheet4->getStyle("A{$r4}:G{$r4}")->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 10],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '10B981']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+        $r4++;
+
+        $dailyAggregates = [];
+        foreach ($sales as $sale) {
+            if ($sale->status === 'rejected') {
+                continue;
+            }
+            $dKey = ($sale->approved_at ?? $sale->created_at)?->timezone('Asia/Almaty')->format('Y-m-d') ?: 'Без даты';
+            if (! isset($dailyAggregates[$dKey])) {
+                $c = Carbon::parse($dKey);
+                $dailyAggregates[$dKey] = [
+                    'date' => $dKey,
+                    'day_name' => match ($c->dayOfWeekIso) {
+                        1 => 'Пн', 2 => 'Вт', 3 => 'Ср', 4 => 'Чт', 5 => 'Пт', 6 => 'Сб', 7 => 'Вс', default => '—'
+                    },
+                    'checks' => 0,
+                    'revenue' => 0.0,
+                    'units' => 0,
+                    'in_stock' => 0,
+                    'on_order' => 0,
+                ];
+            }
+            $dailyAggregates[$dKey]['checks']++;
+            $dailyAggregates[$dKey]['revenue'] += (float) $sale->subtotal;
+            foreach ($sale->items as $it) {
+                $q = (int) $it->quantity;
+                $dailyAggregates[$dKey]['units'] += $q;
+                $isOnOrder = $it->is_on_order !== null ? (bool) $it->is_on_order : (bool) $sale->is_on_order;
+                if ($isOnOrder) {
+                    $dailyAggregates[$dKey]['on_order'] += $q;
+                } else {
+                    $dailyAggregates[$dKey]['in_stock'] += $q;
+                }
+            }
+        }
+
+        krsort($dailyAggregates);
+        $dayStartRow = $r4;
+        foreach ($dailyAggregates as $dayRow) {
+            $sheet4->fromArray([
+                $dayRow['date'],
+                $dayRow['day_name'],
+                $dayRow['checks'],
+                $dayRow['revenue'],
+                $dayRow['units'],
+                $dayRow['in_stock'],
+                $dayRow['on_order'],
+            ], null, 'A' . $r4);
+            if ($r4 % 2 === 0) {
+                $sheet4->getStyle("A{$r4}:G{$r4}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F8FAFC');
+            }
+            $r4++;
+        }
+        $dayEndRow = max($dayStartRow, $r4 - 1);
+
+        $sheet4->getStyle("A{$dayStartRow}:G{$dayEndRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('E2E8F0');
+        $sheet4->getStyle("A{$dayStartRow}:B{$dayEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet4->getStyle("C{$dayStartRow}:C{$dayEndRow}")->getNumberFormat()->setFormatCode('#,##0');
+        $sheet4->getStyle("D{$dayStartRow}:D{$dayEndRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet4->getStyle("E{$dayStartRow}:G{$dayEndRow}")->getNumberFormat()->setFormatCode('#,##0');
+
+        foreach (range('A', 'G') as $col) {
+            $sheet4->getColumnDimension($col)->setAutoSize(true);
         }
 
         $spreadsheet->setActiveSheetIndex(0);
@@ -851,23 +1020,36 @@ class ReportController extends Controller
         }
 
         // ========================================================
-        // 3. ДИНАМИКА ПРОДАЖ ПО ДНЯМ ДЛЯ ГРАФИКА
+        // 3. ДИНАМИКА ПРОДАЖ ПО ДНЯМ ДЛЯ ГРАФИКА И АНАЛИТИКИ
         // ========================================================
         $dynamicsMap = [];
 
-        // Если задан диапазон дат, инициализируем каждый день нулями для непрерывного графика
-        if ($dateFrom && $dateTo && $dateFrom->diffInDays($dateTo) <= 60) {
-            $cursor = clone $dateFrom;
-            while ($cursor->lte($dateTo)) {
+        // Если задан диапазон дат, инициализируем каждый день нулями для непрерывного ряда
+        if ($dateFrom && $dateTo) {
+            $cursor = (clone $dateFrom)->startOfDay();
+            $limit = (clone $dateTo)->startOfDay();
+            while ($cursor->lte($limit)) {
                 $dKey = $cursor->format('Y-m-d');
                 $dynamicsMap[$dKey] = [
                     'date' => $dKey,
-                    'day_label' => $cursor->translatedFormat('d M') ?: $cursor->format('d.m'),
+                    'day_label' => $cursor->format('d.m'),
+                    'day_name' => match ($cursor->dayOfWeekIso) {
+                        1 => 'Пн',
+                        2 => 'Вт',
+                        3 => 'Ср',
+                        4 => 'Чт',
+                        5 => 'Пт',
+                        6 => 'Сб',
+                        7 => 'Вс',
+                        default => '',
+                    },
                     'revenue' => 0.0,
                     'units' => 0,
                     'in_stock_units' => 0,
                     'on_order_units' => 0,
+                    'discount_amount' => 0.0,
                     'sales_count' => 0,
+                    'average_check' => 0,
                     '_sale_ids' => [],
                 ];
                 $cursor->addDay();
@@ -875,17 +1057,32 @@ class ReportController extends Controller
         }
 
         foreach ($saleItems as $it) {
-            $dKey = Carbon::parse($it->approved_at)->format('Y-m-d');
+            // Важно: переводим дату и время утверждения продажи в часовой пояс магазина Asia/Almaty (UTC+5),
+            // чтобы вечерние продажи чеков не попадали в чужой календарный день
+            $approvedTime = Carbon::parse($it->approved_at)->timezone('Asia/Almaty');
+            $dKey = $approvedTime->format('Y-m-d');
+
             if (! isset($dynamicsMap[$dKey])) {
-                $c = Carbon::parse($it->approved_at);
                 $dynamicsMap[$dKey] = [
                     'date' => $dKey,
-                    'day_label' => $c->format('d.m'),
+                    'day_label' => $approvedTime->format('d.m'),
+                    'day_name' => match ($approvedTime->dayOfWeekIso) {
+                        1 => 'Пн',
+                        2 => 'Вт',
+                        3 => 'Ср',
+                        4 => 'Чт',
+                        5 => 'Пт',
+                        6 => 'Сб',
+                        7 => 'Вс',
+                        default => '',
+                    },
                     'revenue' => 0.0,
                     'units' => 0,
                     'in_stock_units' => 0,
                     'on_order_units' => 0,
+                    'discount_amount' => 0.0,
                     'sales_count' => 0,
+                    'average_check' => 0,
                     '_sale_ids' => [],
                 ];
             }
@@ -893,9 +1090,11 @@ class ReportController extends Controller
             $isOnOrder = $it->item_is_on_order !== null ? (bool) $it->item_is_on_order : (bool) $it->sale_is_on_order;
             $qty = (int) $it->quantity;
             $tot = (float) $it->line_total;
+            $disc = (float) ($it->discount_amount ?? 0);
 
             $dynamicsMap[$dKey]['revenue'] += $tot;
             $dynamicsMap[$dKey]['units'] += $qty;
+            $dynamicsMap[$dKey]['discount_amount'] += $disc;
             if ($isOnOrder) {
                 $dynamicsMap[$dKey]['on_order_units'] += $qty;
             } else {
@@ -906,12 +1105,40 @@ class ReportController extends Controller
         }
 
         ksort($dynamicsMap);
+
         $salesDynamics = array_values(array_map(function ($day) {
-            $day['sales_count'] = count($day['_sale_ids']);
-            $day['revenue'] = round((float) $day['revenue'], 2);
+            $cnt = count($day['_sale_ids']);
+            $rev = round((float) $day['revenue'], 2);
+            $day['sales_count'] = $cnt;
+            $day['revenue'] = $rev;
+            $day['discount_amount'] = round((float) $day['discount_amount'], 2);
+            $day['average_check'] = $cnt > 0 ? round($rev / $cnt) : 0;
             unset($day['_sale_ids']);
             return $day;
         }, $dynamicsMap));
+
+        // Добавляем расчет изменений относительно предыдущего дня
+        $prevDay = null;
+        foreach ($salesDynamics as &$day) {
+            if ($prevDay !== null) {
+                $pRev = (float) $prevDay['revenue'];
+                $pCnt = (int) $prevDay['sales_count'];
+                $revDiff = round($day['revenue'] - $pRev, 2);
+                $day['prev_revenue'] = $pRev;
+                $day['revenue_diff'] = $revDiff;
+                $day['revenue_diff_percent'] = $pRev > 0
+                    ? round(($revDiff / $pRev) * 100, 1)
+                    : ($day['revenue'] > 0 ? 100.0 : 0.0);
+                $day['sales_count_diff'] = $day['sales_count'] - $pCnt;
+            } else {
+                $day['prev_revenue'] = null;
+                $day['revenue_diff'] = 0;
+                $day['revenue_diff_percent'] = null;
+                $day['sales_count_diff'] = 0;
+            }
+            $prevDay = $day;
+        }
+        unset($day);
 
         // ========================================================
         // 4. ГРУППИРОВКА 1: ПО ВИДАМ И РАЗМЕРАМ (ОСНОВНОЙ ВИД)
@@ -1269,7 +1496,7 @@ class ReportController extends Controller
         // Справочники всех существующих видов и размеров для быстрых чип-фильтров (как в Excel)
         $knownApparelTypes = [
             'Поло', 'Брюки', 'Юбка', 'Рубашка', 'Жилет', 'Пиджак', 'Сарафан', 'Блузка',
-            'Шорты', 'Платье', 'Галстук', 'Фартук', 'Костюм', 'Спортивная форма', 'Кроссовки', 'Обувь'
+            'Шорты', 'Платье', 'Галстук', 'Фартук', 'Костюм', 'Спортивная форма', 'Кроссовки', 'Обувь', 'Шапки'
         ];
         $dbTypes = DB::table('sale_items')->whereNotNull('product_type')->where('product_type', '!=', '')->distinct()->pluck('product_type');
         $prodTypes = DB::table('products')->whereNotNull('type')->where('type', '!=', '')->distinct()->pluck('type');
@@ -1346,12 +1573,15 @@ class ReportController extends Controller
 
         $name = trim((string) $productName);
         if ($name !== '') {
+            if (mb_stripos($name, 'шапк') !== false) {
+                return 'Шапки';
+            }
             $knownTypes = [
                 'Поло', 'Футболка', 'Брюки', 'Юбка', 'Жилет', 'Пиджак', 'Жакет',
                 'Рубашка', 'Блузка', 'Сарафан', 'Шорты', 'Платье', 'Галстук',
                 'Фартук', 'Костюм', 'Свитшот', 'Худи', 'Толстовка', 'Бомбер',
                 'Кардиган', 'Водолазка', 'Куртка', 'Ветровка', 'Кроссовки',
-                'Туфли', 'Обувь', 'Ремень', 'Носки', 'Колготки', 'Банты', 'Шеврон', 'Форма'
+                'Туфли', 'Обувь', 'Ремень', 'Носки', 'Колготки', 'Банты', 'Шеврон', 'Форма', 'Шапки'
             ];
             foreach ($knownTypes as $kt) {
                 if (mb_stripos($name, $kt) !== false) {
@@ -1414,5 +1644,119 @@ class ReportController extends Controller
         });
 
         return $sizes;
+    }
+
+    /**
+     * Проверка, относится ли позиция к виду «Шапки» по типу или наименованию.
+     */
+    private function isHatTypeOrName(?string $type, ?string $name): bool
+    {
+        $t = mb_strtolower(trim((string) $type));
+        $n = mb_strtolower(trim((string) $name));
+
+        return $t === 'шапки' || $t === 'шапка' || mb_strpos($t, 'шапк') !== false || mb_strpos($n, 'шапк') !== false;
+    }
+
+    /**
+     * Детализация продаж и состава чеков за конкретный день (Day Drill-down).
+     */
+    public function dayDetails(Request $request): JsonResponse
+    {
+        $dateStr = $request->string('date')->toString();
+        if (! $dateStr) {
+            return response()->json(['error' => 'Укажите дату в формате YYYY-MM-DD'], 400);
+        }
+
+        $start = Carbon::parse($dateStr, 'Asia/Almaty')->startOfDay();
+        $end = Carbon::parse($dateStr, 'Asia/Almaty')->endOfDay();
+        $startUtc = $start->copy()->utc();
+        $endUtc = $end->copy()->utc();
+
+        $sales = Sale::query()
+            ->where('status', 'approved')
+            ->where(function ($q) use ($startUtc, $endUtc) {
+                $q->whereBetween('approved_at', [$startUtc->toIso8601String(), $endUtc->toIso8601String()])
+                  ->orWhereBetween('approved_at', [$startUtc->toDateTimeString(), $endUtc->toDateTimeString()]);
+            })
+            ->with(['items.product.category', 'cashier'])
+            ->orderBy('approved_at')
+            ->get();
+
+        $totalRevenue = 0.0;
+        $totalUnits = 0;
+        $inStockUnits = 0;
+        $onOrderUnits = 0;
+        $itemsMap = [];
+
+        $checks = $sales->map(function ($s) use (&$totalRevenue, &$totalUnits, &$inStockUnits, &$onOrderUnits, &$itemsMap) {
+            $totalRevenue += (float) $s->subtotal;
+            $checkItems = $s->items->map(function ($it) use ($s, &$totalUnits, &$inStockUnits, &$onOrderUnits, &$itemsMap) {
+                $qty = (int) $it->quantity;
+                $totalUnits += $qty;
+                $isOnOrder = $it->is_on_order !== null ? (bool) $it->is_on_order : (bool) $s->is_on_order;
+                if ($isOnOrder) {
+                    $onOrderUnits += $qty;
+                } else {
+                    $inStockUnits += $qty;
+                }
+
+                $name = $it->product_name ?: $it->product?->name ?: 'Товар';
+                $type = $it->product_type ?: $it->product?->type ?: 'Товар';
+                $isHat = $this->isHatTypeOrName($type, $name);
+                $size = ($it->variant_size && $it->variant_size !== '—' && ! $isHat) ? $it->variant_size : '—';
+                $key = "{$name}___{$size}";
+
+                if (! isset($itemsMap[$key])) {
+                    $itemsMap[$key] = [
+                        'name' => $name,
+                        'type' => $type,
+                        'size' => $size,
+                        'quantity' => 0,
+                        'revenue' => 0.0,
+                    ];
+                }
+                $itemsMap[$key]['quantity'] += $qty;
+                $itemsMap[$key]['revenue'] += (float) $it->line_total;
+
+                return [
+                    'id' => $it->id,
+                    'name' => $name,
+                    'type' => $type,
+                    'size' => $size,
+                    'quantity' => $qty,
+                    'sale_price' => (float) $it->sale_price,
+                    'line_total' => (float) $it->line_total,
+                ];
+            });
+
+            return [
+                'id' => $s->id,
+                'number' => $s->number,
+                'time' => Carbon::parse($s->approved_at)->timezone('Asia/Almaty')->format('H:i'),
+                'is_on_order' => (bool) $s->is_on_order,
+                'subtotal' => (float) $s->subtotal,
+                'discount_percent' => (float) ($s->discount_percent ?? 0),
+                'cashier_name' => $s->cashier?->name ?? '—',
+                'cashier_note' => $s->cashier_note,
+                'items' => $checkItems,
+            ];
+        });
+
+        $sortedItems = array_values($itemsMap);
+        usort($sortedItems, fn ($a, $b) => $b['quantity'] <=> $a['quantity']);
+
+        return response()->json([
+            'date' => $dateStr,
+            'summary' => [
+                'sales_count' => $sales->count(),
+                'revenue' => round($totalRevenue, 2),
+                'total_units' => $totalUnits,
+                'in_stock_units' => $inStockUnits,
+                'on_order_units' => $onOrderUnits,
+                'average_check' => $sales->count() > 0 ? round($totalRevenue / $sales->count()) : 0,
+            ],
+            'checks' => $checks,
+            'top_items' => $sortedItems,
+        ]);
     }
 }

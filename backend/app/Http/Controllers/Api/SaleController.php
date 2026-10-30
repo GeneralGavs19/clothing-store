@@ -138,12 +138,19 @@ class SaleController extends Controller
 
     public function quickSale(Request $request, SalesService $sales, ActivityLogger $logger, TelegramService $telegram)
     {
+        $isHat = false;
+        if (! empty($request->type) && mb_stripos((string) $request->type, 'шапк') !== false) {
+            $isHat = true;
+        } elseif (! empty($request->name) && mb_stripos((string) $request->name, 'шапк') !== false) {
+            $isHat = true;
+        }
+
         $data = $request->validate([
             'name' => ['required', 'string', 'max:180'],
             'type' => ['nullable', 'string', 'max:100'],
             'category_id' => ['nullable', 'exists:categories,id'],
             'category_name' => ['nullable', 'string', 'max:100'],
-            'size' => ['required', 'string', 'max:64'],
+            'size' => [$isHat ? 'nullable' : 'required', 'string', 'max:64'],
             'color' => ['nullable', 'string', 'max:64'],
             'original_price' => ['nullable', 'numeric', 'min:0'],
             'sale_price' => ['required', 'numeric', 'min:0'],
@@ -158,6 +165,10 @@ class SaleController extends Controller
             'due_date' => ['nullable', 'date'],
             'fulfillment_status' => ['nullable', 'string', 'in:new,in_progress,ready,delivered,cancelled'],
         ]);
+
+        if ($isHat && empty($data['size'])) {
+            $data['size'] = '';
+        }
 
         $discountPercent = (float) ($data['discount_percent'] ?? 0);
         $salePrice = (float) $data['sale_price'];
@@ -272,7 +283,7 @@ class SaleController extends Controller
             'items.*.product_variant_id' => ['nullable', 'exists:product_variants,id'],
             'items.*.product_name' => ['nullable', 'string', 'max:180'],
             'items.*.product_type' => ['nullable', 'string', 'max:100'],
-            'items.*.variant_size' => ['required', 'string', 'max:64'],
+            'items.*.variant_size' => ['nullable', 'string', 'max:64'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
             'items.*.original_price' => ['nullable', 'numeric', 'min:0'],
             'items.*.discount_percent' => ['nullable', 'numeric', 'in:0,10,15,100'],

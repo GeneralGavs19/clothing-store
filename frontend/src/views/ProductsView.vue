@@ -148,7 +148,7 @@
           </select>
         </label>
 
-        <div ref="variantTableRef" class="block space-y-3 sm:col-span-2">
+        <div v-if="!isHat(form.type, form.name)" ref="variantTableRef" class="block space-y-3 sm:col-span-2">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
               <span class="text-sm font-semibold">Размеры модели</span>
@@ -262,6 +262,25 @@
           </div>
         </div>
 
+        <div v-else class="block space-y-2 sm:col-span-2 rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 dark:border-indigo-900/60 dark:bg-indigo-950/30">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-semibold text-indigo-900 dark:text-indigo-200">Товар «Шапки» (без размера)</span>
+            <span class="rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-300">Размер не требуется</span>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Для шапок размер не запрашивается и не отображается в списках.</p>
+          <label class="block pt-1">
+            <span class="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Количество в магазине (шт.)</span>
+            <input
+              v-model.number="form.variants[0].stock_store"
+              class="input h-9 px-3 text-sm font-semibold tabular-nums w-48"
+              type="number"
+              min="0"
+              step="1"
+              placeholder="0"
+            />
+          </label>
+        </div>
+
         <label class="block sm:col-span-2">
           <span class="mb-1 block text-sm font-medium">Всего в магазине (авто)</span>
           <input :value="storeTotal" class="input bg-slate-50 dark:bg-slate-900" type="number" disabled />
@@ -344,6 +363,7 @@ const importing = ref(false)
 const editing = ref(null)
 const variantTableRef = ref(null)
 const popularTypes = [
+  'Шапки',
   'Футболка',
   'Худи',
   'Свитшот',
@@ -456,7 +476,17 @@ function debouncedFetch() {
   debounce = window.setTimeout(() => fetchProducts(1), 300)
 }
 
+function isHat(type, name) {
+  const t = String(type || '').toLowerCase()
+  const n = String(name || '').toLowerCase()
+  return t === 'шапки' || t === 'шапка' || n.includes('шапк')
+}
+
 function prepareVariantsForSave(rows) {
+  if (isHat(form.type, form.name)) {
+    const qty = Math.max(0, Number(rows?.[0]?.stock_store) || 0)
+    return [{ id: rows?.[0]?.id ?? null, size: '', stock_store: qty }]
+  }
   return (rows || [])
     .map((v) => ({
       id: v.id,
@@ -564,10 +594,12 @@ const storeTotal = computed(() =>
 function variantSummaryLine(product) {
   const parts = []
   if (product.color) parts.push(product.color)
-  const vars = product.variants || []
-  const sizes = vars.map((v) => v.size).filter(Boolean)
-  if (sizes.length) parts.push(`размеры: ${sizes.slice(0, 6).join(', ')}${sizes.length > 6 ? '…' : ''}`)
-  else if (product.size) parts.push(`размеры: ${product.size}`)
+  if (!isHat(product.type, product.name)) {
+    const vars = product.variants || []
+    const sizes = vars.map((v) => v.size).filter(Boolean)
+    if (sizes.length) parts.push(`размеры: ${sizes.slice(0, 6).join(', ')}${sizes.length > 6 ? '…' : ''}`)
+    else if (product.size) parts.push(`размеры: ${product.size}`)
+  }
   const total = Number(product.total_quantity ?? 0)
   if (total) parts.push(`${total} ед.`)
   parts.push(product.category?.name || 'Без категории')

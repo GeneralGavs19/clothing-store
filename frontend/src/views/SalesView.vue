@@ -180,7 +180,7 @@
 
             <!-- Размер и Цвет -->
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
+              <div v-if="!isHat(quickForm.type, quickForm.name)">
                 <label class="block text-xs font-medium text-slate-700 dark:text-slate-300">
                   Размер <span class="text-rose-500">*</span>
                 </label>
@@ -188,7 +188,7 @@
                   v-model="quickForm.size"
                   class="input mt-1"
                   placeholder="128, 170, M, L..."
-                  required
+                  :required="!isHat(quickForm.type, quickForm.name)"
                 />
                 <!-- Быстрые чипы размеров -->
                 <div class="mt-1.5 flex flex-wrap gap-1">
@@ -205,6 +205,10 @@
                     {{ sz }}
                   </button>
                 </div>
+              </div>
+              <div v-else class="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3 dark:border-indigo-900/60 dark:bg-indigo-950/30 flex flex-col justify-center">
+                <span class="text-xs font-bold text-indigo-900 dark:text-indigo-200">Товар «Шапки»</span>
+                <span class="text-[11px] text-indigo-700 dark:text-indigo-300">Размер не требуется (единый размер)</span>
               </div>
 
               <div>
@@ -791,7 +795,7 @@
                 <div class="min-w-0 flex-1">
                   <div class="truncate text-sm font-medium">{{ item.product.name }}</div>
                   <div class="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
-                    <span>Размер: <strong class="text-slate-800 dark:text-slate-200">{{ item.variant.size }}</strong></span>
+                    <span v-if="item.variant?.size && !isHat(item.product?.type, item.product?.name)">Размер: <strong class="text-slate-800 dark:text-slate-200">{{ item.variant.size }}</strong></span>
                     <span v-if="item.product.type" class="rounded bg-slate-100 px-1.5 py-0.2 text-[10px] dark:bg-slate-800">{{ item.product.type }}</span>
                   </div>
 
@@ -1139,27 +1143,33 @@
           <div
             v-for="sale in sales.sales"
             :key="sale.id"
-            class="p-4 transition hover:bg-slate-50/50 dark:hover:bg-slate-900/30"
+            class="p-3.5 sm:p-4 transition hover:bg-slate-50/60 dark:hover:bg-slate-900/40"
           >
-            <!-- Карточка продажи: СВЕРХУ НАЗВАНИЕ ТОВАРА, СНИЗУ НОМЕР И ДАТА ВРЕМЯ -->
-            <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <!-- Карточка чека в ленте -->
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div class="min-w-0 flex-1">
-                <!-- Верхняя строка: Название товара (товаров), бейджи типа (В наличии / На заказ) и статуса -->
-                <div class="flex flex-wrap items-center gap-2">
-                  <h3 class="font-bold text-slate-900 dark:text-white text-base sm:text-lg">
-                    {{ getSaleProductTitle(sale) }}
-                  </h3>
+                <!-- Верхняя строка: Номер чека, дата и время, бейджи типа (В наличии / На заказ), скидки и статуса -->
+                <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  <span class="rounded-lg bg-slate-900 px-2 py-0.5 text-xs font-black text-white dark:bg-white dark:text-slate-900 shadow-sm">
+                    Чек №{{ sale.id }}
+                  </span>
+
+                  <!-- Дата и время -->
+                  <span class="text-xs font-semibold text-slate-700 dark:text-slate-300 inline-flex items-center gap-1">
+                    <Clock class="h-3 w-3 text-slate-400" />
+                    {{ date(sale.sold_at || sale.approved_at || sale.created_at) }}
+                  </span>
 
                   <!-- Бейдж типа заказа: На заказ или В наличии -->
                   <span
-                    class="rounded-full px-2.5 py-0.5 text-xs font-semibold inline-flex items-center gap-1 border"
+                    class="rounded-full px-2.5 py-0.5 text-[11px] font-semibold inline-flex items-center gap-1 border"
                     :class="sale.is_on_order
                       ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
                       : 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'"
                   >
                     <Package v-if="sale.is_on_order" class="h-3 w-3" />
                     <Check v-else class="h-3 w-3" />
-                    {{ sale.order_type_label || (sale.is_on_order ? 'На заказ' : 'В наличии') }}
+                    {{ sale.order_type_label || (sale.is_on_order ? '📦 На заказ' : 'В наличии') }}
                   </span>
 
                   <!-- Статус выполнения (для предзаказов) -->
@@ -1171,40 +1181,19 @@
                     {{ getOrderStatusLabel(sale.fulfillment_status) }}
                   </span>
 
-                  <!-- Срок готовности -->
+                  <!-- Скидка если есть -->
                   <span
-                    v-if="sale.is_on_order && sale.due_date"
-                    class="rounded bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-900 border border-amber-200 dark:border-amber-900 dark:bg-amber-950/70 dark:text-amber-300 inline-flex items-center gap-1"
+                    v-if="Number(sale.discount_percent) === 100 || Number(sale.subtotal) === 0"
+                    class="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800"
                   >
-                    <Calendar class="h-3 w-3 text-amber-600" />
-                    Срок: {{ formatDate(sale.due_date) }}
+                    🎁 Бесплатно
                   </span>
-
-                  <!-- Быстрое продвижение статуса заказа на пошив -->
-                  <button
-                    v-if="sale.is_on_order && sale.status === 'approved' && (!sale.fulfillment_status || sale.fulfillment_status === 'new')"
-                    type="button"
-                    class="rounded bg-sky-100 hover:bg-sky-200 text-sky-800 dark:bg-sky-950 dark:text-sky-300 px-2 py-0.5 text-[10px] font-bold"
-                    @click="advanceOrderStatus(sale, 'in_progress')"
+                  <span
+                    v-else-if="Number(sale.discount_percent) > 0"
+                    class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
                   >
-                    → В работу
-                  </button>
-                  <button
-                    v-else-if="sale.is_on_order && sale.status === 'approved' && sale.fulfillment_status === 'in_progress'"
-                    type="button"
-                    class="rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-2 py-0.5 text-[10px] font-bold"
-                    @click="advanceOrderStatus(sale, 'ready')"
-                  >
-                    → Готов к выдаче
-                  </button>
-                  <button
-                    v-else-if="sale.is_on_order && sale.status === 'approved' && sale.fulfillment_status === 'ready'"
-                    type="button"
-                    class="rounded bg-slate-200 hover:bg-slate-300 text-slate-800 dark:bg-slate-800 dark:text-slate-200 px-2 py-0.5 text-[10px] font-bold"
-                    @click="advanceOrderStatus(sale, 'delivered')"
-                  >
-                    → Выдан покупателю
-                  </button>
+                    Скидка {{ sale.discount_percent }}%
+                  </span>
 
                   <!-- Статус продажи -->
                   <span
@@ -1215,37 +1204,43 @@
                   </span>
                 </div>
 
-                <!-- Нижняя строка (снизу): Номер чека, дата и время, кассир и количество шт -->
-                <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                  <span class="font-semibold text-slate-700 dark:text-slate-300">Чек №{{ sale.id }}</span>
-                  <span>·</span>
-                  <span>{{ date(sale.sold_at || sale.approved_at || sale.created_at) }}</span>
-                  <span>·</span>
-                  <span>Кассир: <strong class="font-medium text-slate-700 dark:text-slate-300">{{ sale.cashier?.name || '—' }}</strong></span>
-                  <span>·</span>
-                  <span>{{ (sale.items || []).reduce((acc, i) => acc + (Number(i.quantity) || 1), 0) }} шт.</span>
+                <!-- Строка с кратким составом товаров и кассиром -->
+                <div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                  <span class="font-bold text-slate-900 dark:text-white shrink-0">
+                    {{ (sale.items || []).reduce((acc, i) => acc + (Number(i.quantity) || 1), 0) }} шт.:
+                  </span>
+                  <span class="line-clamp-1 max-w-xl text-slate-700 dark:text-slate-300 font-medium">
+                    {{ getSaleItemsSummaryText(sale) }}
+                  </span>
+                  <span class="text-slate-400">·</span>
+                  <span class="shrink-0">Кассир: <strong class="font-medium text-slate-700 dark:text-slate-300">{{ sale.cashier?.name || '—' }}</strong></span>
                 </div>
               </div>
 
-              <!-- Итоговая сумма чека и кнопки действий -->
-              <div class="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
-                <div class="text-right">
+              <!-- Итоговая сумма чека и действия -->
+              <div class="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+                <div class="text-right sm:mr-1">
                   <div
                     class="text-lg sm:text-xl font-black tabular-nums"
                     :class="Number(sale.subtotal) === 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-emerald-600 dark:text-emerald-400'"
                   >
                     {{ money(sale.subtotal) }}
                   </div>
-                  <span
-                    v-if="Number(sale.subtotal) === 0"
-                    class="inline-block rounded bg-emerald-100 px-1.5 py-0.2 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                  >
-                    🎁 Бесплатно
-                  </span>
                 </div>
 
                 <div class="flex items-center gap-1.5">
-                  <!-- Кнопка: Повторить чек (копировать в кассу) -->
+                  <!-- Кнопка: Состав (раскрыть/скрыть детали) -->
+                  <button
+                    type="button"
+                    class="btn-muted h-8 px-2.5 text-xs flex items-center gap-1 font-semibold text-slate-700 hover:border-slate-400 dark:text-slate-300"
+                    :title="isSaleExpanded(sale.id) ? 'Свернуть состав' : 'Показать товары чека'"
+                    @click="toggleSaleDetails(sale.id)"
+                  >
+                    <ChevronDown class="h-3.5 w-3.5 transition-transform" :class="isSaleExpanded(sale.id) ? 'rotate-180' : ''" />
+                    <span class="hidden sm:inline">{{ isSaleExpanded(sale.id) ? 'Свернуть' : 'Состав' }}</span>
+                  </button>
+
+                  <!-- Кнопка: Повторить чек -->
                   <button
                     type="button"
                     class="btn-muted h-8 px-2 text-xs flex items-center gap-1 font-semibold text-slate-700 hover:border-sky-400 hover:text-sky-600 dark:text-slate-300 dark:hover:text-sky-400"
@@ -1253,14 +1248,14 @@
                     @click="duplicateSaleToCart(sale)"
                   >
                     <Copy class="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
-                    <span class="hidden sm:inline">Повторить</span>
+                    <span class="hidden md:inline">Повторить</span>
                   </button>
 
-                  <!-- Кнопка: Изменить продажу -->
+                  <!-- Кнопка: Редактировать закупку -->
                   <button
                     type="button"
-                    class="btn-muted h-8 px-2 text-xs flex items-center gap-1 font-semibold text-slate-700 hover:border-emerald-400 hover:text-emerald-600 dark:text-slate-300 dark:hover:text-emerald-400"
-                    title="Изменить продажу"
+                    class="btn-muted h-8 px-2.5 text-xs flex items-center gap-1 font-semibold text-slate-700 hover:border-emerald-400 hover:text-emerald-600 dark:text-slate-300 dark:hover:text-emerald-400"
+                    title="Редактировать закупку"
                     @click="openEditModal(sale)"
                   >
                     <Pencil class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
@@ -1276,7 +1271,7 @@
                     @click="openCancelModal(sale)"
                   >
                     <Ban class="h-3.5 w-3.5 text-rose-500" />
-                    <span class="hidden sm:inline">Отменить</span>
+                    <span class="hidden lg:inline">Отменить</span>
                   </button>
 
                   <!-- Кнопка: Удалить продажу -->
@@ -1293,42 +1288,40 @@
               </div>
             </div>
 
-            <!-- Комментарий / примечание кассира (если есть) -->
+            <!-- Детализация товаров (раскрывается по кнопке 'Состав') -->
             <div
-              v-if="sale.cashier_note"
-              class="mt-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300"
+              v-if="isSaleExpanded(sale.id)"
+              class="mt-3 rounded-xl border border-slate-200/90 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-950 p-3 space-y-2.5 transition-all"
             >
-              <span class="font-medium text-slate-500">Примечание:</span> {{ sale.cashier_note }}
-            </div>
-
-            <!-- Детализация товаров в чеке -->
-            <div class="mt-3 rounded-lg border border-slate-200/80 bg-white dark:border-slate-800/80 dark:bg-slate-950 p-2.5">
-              <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                Товары в этом заказе:
+              <div class="flex items-center justify-between text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                <span>Товары в чеке ({{ sale.items?.length || 0 }} поз.):</span>
+                <span v-if="sale.is_on_order && sale.due_date" class="text-amber-700 dark:text-amber-300 normal-case font-bold inline-flex items-center gap-1">
+                  <Calendar class="h-3 w-3" />
+                  Срок готовности: {{ formatDate(sale.due_date) }}
+                </span>
               </div>
+
               <div class="space-y-1.5">
                 <div
                   v-for="item in sale.items"
                   :key="item.id"
-                  class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs py-1 border-b border-slate-100 last:border-b-0 dark:border-slate-900"
+                  class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs py-1.5 border-b border-slate-200/60 last:border-b-0 dark:border-slate-800/60"
                 >
                   <div class="flex flex-wrap items-center gap-1.5 min-w-0">
-                    <!-- Название товара -->
                     <span class="font-bold text-slate-900 dark:text-white">
                       {{ item.product_name || item.product?.name || 'Товар' }}
                     </span>
 
-                    <!-- Вид товара -->
                     <span
                       v-if="item.product_type || item.product?.type"
-                      class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                      class="rounded bg-slate-200/70 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300"
                     >
                       {{ item.product_type || item.product?.type }}
                     </span>
 
-                    <!-- Размер -->
+                    <!-- Размер скрыт для шапок -->
                     <span
-                      v-if="item.variant_size"
+                      v-if="item.variant_size && item.variant_size !== '—' && !isHat(item.product_type, item.product_name)"
                       class="rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
                     >
                       {{ item.variant_size }}
@@ -1348,11 +1341,57 @@
                   </div>
                 </div>
               </div>
+
+              <!-- Примечание кассира -->
+              <div
+                v-if="sale.cashier_note"
+                class="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+              >
+                <span class="font-medium text-slate-500">Примечание:</span> {{ sale.cashier_note }}
+              </div>
+
+              <!-- Быстрое изменение статуса пошива -->
+              <div v-if="sale.is_on_order && sale.status === 'approved'" class="pt-1 flex items-center gap-2 text-xs">
+                <span class="text-slate-500 text-[11px]">Статус заказа:</span>
+                <button
+                  v-if="!sale.fulfillment_status || sale.fulfillment_status === 'new'"
+                  type="button"
+                  class="rounded bg-sky-100 hover:bg-sky-200 text-sky-800 dark:bg-sky-950 dark:text-sky-300 px-2.5 py-1 text-xs font-bold"
+                  @click="advanceOrderStatus(sale, 'in_progress')"
+                >
+                  → Перевести в пошив
+                </button>
+                <button
+                  v-else-if="sale.fulfillment_status === 'in_progress'"
+                  type="button"
+                  class="rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-2.5 py-1 text-xs font-bold"
+                  @click="advanceOrderStatus(sale, 'ready')"
+                >
+                  → Готов к выдаче
+                </button>
+                <button
+                  v-else-if="sale.fulfillment_status === 'ready'"
+                  type="button"
+                  class="rounded bg-slate-200 hover:bg-slate-300 text-slate-800 dark:bg-slate-800 dark:text-slate-200 px-2.5 py-1 text-xs font-bold"
+                  @click="advanceOrderStatus(sale, 'delivered')"
+                >
+                  → Выдан покупателю
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        <PaginationBar :meta="sales.meta" @page="fetchHistory" />
+        <!-- Индикатор загрузки и sentinel для бесконечной ленты -->
+        <div ref="infiniteScrollSentinel" class="py-6 flex flex-col items-center justify-center text-center">
+          <div v-if="sales.loadingMore" class="flex items-center gap-2 text-xs font-semibold text-slate-500">
+            <LoaderCircle class="h-4 w-4 animate-spin text-emerald-600 dark:text-emerald-400" />
+            <span>Загрузка следующих чеков...</span>
+          </div>
+          <div v-else-if="sales.sales.length > 0 && sales.meta.current_page >= sales.meta.last_page" class="text-xs text-slate-400 font-medium">
+            ✓ Все чеки загружены (всего {{ sales.meta.total }} чеков)
+          </div>
+        </div>
       </div>
 
       <!-- РЕЖИМ 2: СВОДНЫЙ РАСЧЕТ ПРОДАННЫХ ПО ВИДАМ ТОВАРОВ И КАЖДОМУ РАЗМЕРУ -->
@@ -1534,7 +1573,7 @@
           </button>
         </div>
 
-        <form class="space-y-4 overflow-y-auto py-4 flex-1 pr-1" @submit.prevent="saveEditSale">
+        <form class="space-y-4 overflow-y-auto py-4 flex-1 pr-1" @submit.prevent="prepareSaveEditSale">
           <!-- Тип заказа: В наличии / На заказ -->
           <div>
             <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -1569,19 +1608,19 @@
             </div>
           </div>
 
-          <!-- Дата оформления чека и срок готовности заказа -->
+          <!-- Дата и время оформления чека и срок готовности заказа -->
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Дата оформления чека <span class="text-rose-500">*</span>
+                Дата и время продажи <span class="text-rose-500">*</span>
               </label>
               <input
                 v-model="editForm.sold_at"
-                type="date"
+                type="datetime-local"
                 class="input text-xs font-semibold"
                 required
               />
-              <p class="mt-0.5 text-[10px] text-slate-400">Дата фиксации продажи в отчетности</p>
+              <p class="mt-0.5 text-[10px] text-slate-400">Дата и точное время фиксации продажи в отчетности</p>
             </div>
 
             <div v-if="editForm.is_on_order">
@@ -1696,30 +1735,104 @@
               </button>
             </div>
 
-            <!-- Добавление нового товара в чек (выбор из каталога) -->
-            <div v-if="showAddEditItem" class="mb-3 rounded-xl border border-emerald-300 bg-emerald-50/50 p-3 dark:border-emerald-800 dark:bg-emerald-950/30">
-              <div class="text-xs font-semibold text-emerald-900 dark:text-emerald-200 mb-2">
-                Добавить позицию из каталога:
+            <!-- Добавление нового товара в чек (из каталога или произвольный товар) -->
+            <div v-if="showAddEditItem" class="mb-3 rounded-xl border border-emerald-300 bg-emerald-50/50 p-3.5 dark:border-emerald-800 dark:bg-emerald-950/30">
+              <!-- Переключатель режима: Из каталога / Произвольный товар -->
+              <div class="flex items-center gap-2 mb-3">
+                <button
+                  type="button"
+                  class="px-2.5 py-1 text-xs rounded-lg font-medium transition"
+                  :class="addEditItemMode === 'catalog'
+                    ? 'bg-emerald-600 text-white font-bold shadow-sm'
+                    : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300'"
+                  @click="addEditItemMode = 'catalog'"
+                >
+                  Из каталога
+                </button>
+                <button
+                  type="button"
+                  class="px-2.5 py-1 text-xs rounded-lg font-medium transition"
+                  :class="addEditItemMode === 'custom'
+                    ? 'bg-emerald-600 text-white font-bold shadow-sm'
+                    : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300'"
+                  @click="addEditItemMode = 'custom'"
+                >
+                  + Произвольный товар
+                </button>
               </div>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                <div>
-                  <label class="block text-[11px] text-slate-600 dark:text-slate-400 mb-0.5">Выберите товар</label>
-                  <select v-model="newItemProductId" class="select text-xs h-8" @change="onEditProductChange">
-                    <option value="">-- Выберите товар --</option>
-                    <option v-for="p in availableProducts" :key="p.id" :value="p.id">{{ p.name }} ({{ p.type || 'Товар' }})</option>
-                  </select>
+
+              <!-- РЕЖИМ 1: ИЗ КАТАЛОГА -->
+              <div v-if="addEditItemMode === 'catalog'">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <label class="block text-[11px] text-slate-600 dark:text-slate-400 mb-0.5">Выберите товар</label>
+                    <select v-model="newItemProductId" class="select text-xs h-8" @change="onEditProductChange">
+                      <option value="">-- Выберите товар --</option>
+                      <option v-for="p in availableProducts" :key="p.id" :value="p.id">{{ p.name }} ({{ p.type || 'Товар' }})</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-[11px] text-slate-600 dark:text-slate-400 mb-0.5">Размер</label>
+                    <div
+                      v-if="selectedEditProduct && isHat(selectedEditProduct.type, selectedEditProduct.name)"
+                      class="h-8 px-2 flex items-center justify-center rounded border border-slate-200 bg-slate-100 text-[11px] font-medium text-slate-500 dark:border-slate-800 dark:bg-slate-800 dark:text-slate-400"
+                    >
+                      Единый размер (шапка)
+                    </div>
+                    <select v-else-if="newItemVariants.length" v-model="newItemVariantId" class="select text-xs h-8" @change="onEditVariantChange">
+                      <option v-for="v in newItemVariants" :key="v.id" :value="v.id">{{ v.size }} ({{ money(v.sale_price) }})</option>
+                    </select>
+                    <input v-else v-model="newItemSize" class="input text-xs h-8" placeholder="Размер (например M, 122)" />
+                  </div>
                 </div>
-                <div>
-                  <label class="block text-[11px] text-slate-600 dark:text-slate-400 mb-0.5">Размер</label>
-                  <select v-if="newItemVariants.length" v-model="newItemVariantId" class="select text-xs h-8" @change="onEditVariantChange">
-                    <option v-for="v in newItemVariants" :key="v.id" :value="v.id">{{ v.size }} ({{ money(v.sale_price) }})</option>
-                  </select>
-                  <input v-else v-model="newItemSize" class="input text-xs h-8" placeholder="Размер (например M, 164)" />
+                <div class="mt-2.5 flex justify-end gap-2">
+                  <button type="button" class="btn-muted h-7 px-2.5 text-xs" @click="showAddEditItem = false">Отмена</button>
+                  <button type="button" class="btn-primary h-7 px-3 text-xs" :disabled="!newItemProductId" @click="confirmAddEditItem">Добавить в чек</button>
                 </div>
               </div>
-              <div class="mt-2.5 flex justify-end gap-2">
-                <button type="button" class="btn-muted h-7 px-2.5 text-xs" @click="showAddEditItem = false">Отмена</button>
-                <button type="button" class="btn-primary h-7 px-3 text-xs" :disabled="!newItemProductId" @click="confirmAddEditItem">Добавить в чек</button>
+
+              <!-- РЕЖИМ 2: ПРОИЗВОЛЬНЫЙ ТОВАР -->
+              <div v-else class="space-y-2 text-xs">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label class="block text-[11px] text-slate-600 dark:text-slate-400 mb-0.5">Название товара <span class="text-rose-500">*</span></label>
+                    <input v-model="customEditName" class="input text-xs h-8" placeholder="Например: Шапка зимняя теплая" />
+                  </div>
+                  <div>
+                    <label class="block text-[11px] text-slate-600 dark:text-slate-400 mb-0.5">Вид товара</label>
+                    <select v-model="customEditType" class="select text-xs h-8">
+                      <option value="">-- Выберите вид --</option>
+                      <option v-for="t in popularTypes" :key="t" :value="t">{{ t }}</option>
+                      <option value="Другое">Другое</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2">
+                  <div>
+                    <label class="block text-[11px] text-slate-600 dark:text-slate-400 mb-0.5">Размер</label>
+                    <div
+                      v-if="isHat(customEditType, customEditName)"
+                      class="h-8 px-2 flex items-center justify-center rounded border border-slate-200 bg-slate-100 text-[11px] font-medium text-slate-500 dark:border-slate-800 dark:bg-slate-800 dark:text-slate-400"
+                    >
+                      Единый
+                    </div>
+                    <input v-else v-model="customEditSize" class="input text-xs h-8" placeholder="Размер (напр. 122)" />
+                  </div>
+                  <div>
+                    <label class="block text-[11px] text-slate-600 dark:text-slate-400 mb-0.5">Цена за шт, ₸ <span class="text-rose-500">*</span></label>
+                    <input v-model.number="customEditPrice" type="number" min="0" step="100" class="input text-xs h-8 font-semibold text-right" placeholder="0" />
+                  </div>
+                  <div>
+                    <label class="block text-[11px] text-slate-600 dark:text-slate-400 mb-0.5">Кол-во (шт.)</label>
+                    <input v-model.number="customEditQty" type="number" min="1" class="input text-xs h-8 font-semibold text-center" />
+                  </div>
+                </div>
+
+                <div class="mt-2.5 flex justify-end gap-2">
+                  <button type="button" class="btn-muted h-7 px-2.5 text-xs" @click="showAddEditItem = false">Отмена</button>
+                  <button type="button" class="btn-primary h-7 px-3 text-xs" :disabled="!customEditName.trim()" @click="confirmAddCustomEditItem">Добавить позицию</button>
+                </div>
               </div>
             </div>
 
@@ -1749,10 +1862,18 @@
                   </div>
 
                   <div class="flex flex-wrap items-center gap-2">
-                    <!-- Размер -->
+                    <!-- Размер: скрыт или 'Единый' для шапок -->
                     <div>
                       <span class="block text-[10px] text-slate-400 mb-0.5">Размер:</span>
+                      <div
+                        v-if="isHat(item.product_type, item.product_name)"
+                        class="h-8 px-2 flex items-center justify-center rounded border border-slate-200 bg-slate-100 text-[11px] font-medium text-slate-500 dark:border-slate-800 dark:bg-slate-800 dark:text-slate-400"
+                        title="У шапок единый универсальный размер"
+                      >
+                        Единый
+                      </div>
                       <input
+                        v-else
                         v-model="item.variant_size"
                         class="input h-8 text-xs font-bold w-20 text-center"
                         placeholder="Размер"
@@ -1913,6 +2034,92 @@
       </div>
     </div>
 
+    <!-- МОДАЛЬНОЕ ОКНО: ПОДТВЕРЖДЕНИЕ ИЗМЕНЕНИЙ В ЧЕКЕ -->
+    <div
+      v-if="showEditConfirmModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      @click.self="showEditConfirmModal = false"
+    >
+      <div class="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+        <div class="flex items-center gap-2.5 text-emerald-600 dark:text-emerald-400">
+          <Check class="h-5 w-5" />
+          <h3 class="font-bold text-base text-slate-900 dark:text-white">Сохранить изменения в чеке №{{ editingSale?.id }}?</h3>
+        </div>
+
+        <div class="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60 space-y-1.5 text-xs text-slate-600 dark:text-slate-300">
+          <div class="flex justify-between">
+            <span>Позиций в чеке:</span>
+            <strong class="text-slate-900 dark:text-white">{{ editForm.items.length }} поз. ({{ editForm.items.reduce((s, i) => s + (Number(i.quantity) || 1), 0) }} шт.)</strong>
+          </div>
+          <div class="flex justify-between">
+            <span>Тип продажи:</span>
+            <strong class="text-slate-900 dark:text-white">{{ editForm.is_on_order ? '📦 На заказ' : 'В наличии' }}</strong>
+          </div>
+          <div class="flex justify-between">
+            <span>Дата и время:</span>
+            <strong class="text-slate-900 dark:text-white">{{ editForm.sold_at }}</strong>
+          </div>
+          <div class="flex justify-between pt-1 border-t border-slate-200 dark:border-slate-700 text-sm">
+            <span class="font-bold text-slate-800 dark:text-slate-200">Итоговая сумма:</span>
+            <strong class="text-emerald-600 dark:text-emerald-400 font-black">{{ money(editFinalTotal) }}</strong>
+          </div>
+        </div>
+
+        <p class="text-[11px] text-slate-500 leading-relaxed">
+          Суммы в чеке и отчетности будут перезаписаны. Статистика и история продаж обновятся автоматически.
+        </p>
+
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+          <button type="button" class="btn-muted h-8 px-3 text-xs" @click="showEditConfirmModal = false">
+            Вернуться к редактированию
+          </button>
+          <button
+            type="button"
+            class="btn-primary h-8 px-4 text-xs font-semibold flex items-center gap-1.5"
+            :disabled="editSaving"
+            @click="executeSaveEditSale"
+          >
+            <LoaderCircle v-if="editSaving" class="h-4 w-4 animate-spin" />
+            <Check v-else class="h-4 w-4" />
+            Да, сохранить
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- МОДАЛЬНОЕ ОКНО: БЕЗОПАСНОЕ УДАЛЕНИЕ ЧЕКА (ДЛЯ АДМИНА) -->
+    <div
+      v-if="saleToDelete"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      @click.self="saleToDelete = null"
+    >
+      <div class="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+        <div class="flex items-center gap-2.5 text-rose-600 dark:text-rose-400">
+          <Trash2 class="h-5 w-5" />
+          <h3 class="font-bold text-base text-slate-900 dark:text-white">Удалить чек №{{ saleToDelete.id }}?</h3>
+        </div>
+        <p class="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+          Вы действительно хотите навсегда удалить <b>Чек №{{ saleToDelete.id }}</b> на сумму <b>{{ money(saleToDelete.subtotal) }}</b>?
+          Если чек был оформлен, списанные товары вернутся на остатки.
+        </p>
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+          <button type="button" class="btn-muted h-8 px-3 text-xs" @click="saleToDelete = null">
+            Отмена
+          </button>
+          <button
+            type="button"
+            class="btn-danger h-8 px-4 text-xs font-semibold flex items-center gap-1.5"
+            :disabled="deleteSaving"
+            @click="executeDeleteSale"
+          >
+            <LoaderCircle v-if="deleteSaving" class="h-4 w-4 animate-spin" />
+            <Trash2 v-else class="h-4 w-4" />
+            Удалить навсегда
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- МОДАЛЬНОЕ ОКНО: БЕЗОПАСНАЯ ОТМЕНА ЧЕКА -->
     <div
       v-if="cancelModalOpen"
@@ -1951,6 +2158,92 @@
           >
             <LoaderCircle v-if="cancelling" class="h-3.5 w-3.5 animate-spin" />
             <span v-else>Подтвердить отмену чека</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- МОДАЛЬНОЕ ОКНО: ПОДТВЕРЖДЕНИЕ ИЗМЕНЕНИЙ В ЧЕКЕ -->
+    <div
+      v-if="showEditConfirmModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      @click.self="showEditConfirmModal = false"
+    >
+      <div class="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+        <div class="flex items-center gap-2.5 text-emerald-600 dark:text-emerald-400">
+          <Check class="h-5 w-5" />
+          <h3 class="font-bold text-base text-slate-900 dark:text-white">Сохранить изменения в чеке №{{ editingSale?.id }}?</h3>
+        </div>
+
+        <div class="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60 space-y-1.5 text-xs text-slate-600 dark:text-slate-300">
+          <div class="flex justify-between">
+            <span>Позиций в чеке:</span>
+            <strong class="text-slate-900 dark:text-white">{{ editForm.items.length }} поз. ({{ editForm.items.reduce((s, i) => s + (Number(i.quantity) || 1), 0) }} шт.)</strong>
+          </div>
+          <div class="flex justify-between">
+            <span>Тип продажи:</span>
+            <strong class="text-slate-900 dark:text-white">{{ editForm.is_on_order ? '📦 На заказ' : 'В наличии' }}</strong>
+          </div>
+          <div class="flex justify-between">
+            <span>Дата и время:</span>
+            <strong class="text-slate-900 dark:text-white">{{ editForm.sold_at }}</strong>
+          </div>
+          <div class="flex justify-between pt-1 border-t border-slate-200 dark:border-slate-700 text-sm">
+            <span class="font-bold text-slate-800 dark:text-slate-200">Итоговая сумма:</span>
+            <strong class="text-emerald-600 dark:text-emerald-400 font-black">{{ money(editFinalTotal) }}</strong>
+          </div>
+        </div>
+
+        <p class="text-[11px] text-slate-500 leading-relaxed">
+          Суммы в чеке и отчетности будут перезаписаны. Статистика и история продаж обновятся автоматически.
+        </p>
+
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+          <button type="button" class="btn-muted h-8 px-3 text-xs" @click="showEditConfirmModal = false">
+            Вернуться к редактированию
+          </button>
+          <button
+            type="button"
+            class="btn-primary h-8 px-4 text-xs font-semibold flex items-center gap-1.5"
+            :disabled="editSaving"
+            @click="executeSaveEditSale"
+          >
+            <LoaderCircle v-if="editSaving" class="h-4 w-4 animate-spin" />
+            <Check v-else class="h-4 w-4" />
+            Да, сохранить
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- МОДАЛЬНОЕ ОКНО: БЕЗОПАСНОЕ УДАЛЕНИЕ ЧЕКА (ДЛЯ АДМИНА) -->
+    <div
+      v-if="saleToDelete"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      @click.self="saleToDelete = null"
+    >
+      <div class="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+        <div class="flex items-center gap-2.5 text-rose-600 dark:text-rose-400">
+          <Trash2 class="h-5 w-5" />
+          <h3 class="font-bold text-base text-slate-900 dark:text-white">Удалить чек №{{ saleToDelete.id }}?</h3>
+        </div>
+        <p class="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+          Вы действительно хотите навсегда удалить <b>Чек №{{ saleToDelete.id }}</b> на сумму <b>{{ money(saleToDelete.subtotal) }}</b>?
+          Если чек был оформлен, списанные товары вернутся на остатки.
+        </p>
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+          <button type="button" class="btn-muted h-8 px-3 text-xs" @click="saleToDelete = null">
+            Отмена
+          </button>
+          <button
+            type="button"
+            class="btn-danger h-8 px-4 text-xs font-semibold flex items-center gap-1.5"
+            :disabled="deleteSaving"
+            @click="executeDeleteSale"
+          >
+            <LoaderCircle v-if="deleteSaving" class="h-4 w-4 animate-spin" />
+            <Trash2 v-else class="h-4 w-4" />
+            Удалить навсегда
           </button>
         </div>
       </div>
@@ -2064,10 +2357,25 @@ const editForm = ref({
 })
 const editSaving = ref(false)
 const showAddEditItem = ref(false)
+const addEditItemMode = ref('catalog')
 const newItemProductId = ref('')
 const newItemVariantId = ref('')
 const newItemSize = ref('')
 const newItemVariants = ref([])
+const selectedEditProduct = computed(() => availableProducts.value.find((p) => Number(p.id) === Number(newItemProductId.value)))
+
+const customEditName = ref('')
+const customEditType = ref('')
+const customEditSize = ref('')
+const customEditPrice = ref(0)
+const customEditQty = ref(1)
+
+const showEditConfirmModal = ref(false)
+const saleToDelete = ref(null)
+const deleteSaving = ref(false)
+const expandedSaleIds = ref(new Set())
+const infiniteScrollSentinel = ref(null)
+let sentinelObserver = null
 
 const cart = ref([])
 const cartIsOnOrder = ref(false)
@@ -2108,7 +2416,7 @@ let debounce
 let historyDebounce
 let timer
 
-// Быстрые названия товаров: Брюки.спорт, Поло к/р, Поло д/р, Бомбер, Худи, Футболка, Шорты
+// Быстрые названия товаров: Брюки.спорт, Поло к/р, Поло д/р, Бомбер, Худи, Футболка, Шорты, Шапка
 const commonNames = [
   'Брюки.спорт',
   'Поло к/р',
@@ -2117,7 +2425,14 @@ const commonNames = [
   'Худи',
   'Футболка',
   'Шорты',
+  'Шапка',
 ]
+
+function isHat(type, name) {
+  const t = String(type || '').toLowerCase()
+  const n = String(name || '').toLowerCase()
+  return t === 'шапки' || t === 'шапка' || n.includes('шапк')
+}
 
 function setQuickName(name) {
   quickForm.value.name = name
@@ -2134,6 +2449,8 @@ function setQuickName(name) {
     quickForm.value.type = 'Футболка'
   } else if (lower.includes('шорт')) {
     quickForm.value.type = 'Шорты'
+  } else if (lower.includes('шапк')) {
+    quickForm.value.type = 'Шапки'
   }
 }
 
@@ -2149,6 +2466,7 @@ const commonColors = [
 
 // Виды товаров (существующие + формы)
 const popularTypes = [
+  'Шапки',
   'Футболка',
   'Худи',
   'Свитшот',
@@ -2402,12 +2720,26 @@ function productLineMeta(product) {
   if (product.type) parts.push(product.type)
   if (product.category?.name) parts.push(product.category.name)
   if (product.color) parts.push(product.color)
-  const vars = product.variants || []
-  if (vars.length) parts.push(vars.map((v) => v.size).filter(Boolean).slice(0, 5).join(', '))
+  if (!isHat(product.type, product.name)) {
+    const vars = product.variants || []
+    if (vars.length) parts.push(vars.map((v) => v.size).filter(Boolean).slice(0, 5).join(', '))
+  }
   return parts.join(' · ')
 }
 
 async function selectProduct(product) {
+  if (isHat(product.type, product.name)) {
+    selectedProduct.value = product
+    try {
+      productDetail.value = await catalog.fetchProduct(product.id)
+      const hatVariant = productDetail.value?.variants?.[0] || { id: null, size: '', sale_price: product.sale_price }
+      selectVariant(hatVariant)
+      return
+    } catch (error) {
+      toast.push(apiError(error), 'error')
+      return
+    }
+  }
   selectedProduct.value = product
   saleStep.value = 'variant'
   try {
@@ -2426,7 +2758,7 @@ function selectVariant(variant) {
 
   if (existing) {
     existing.quantity++
-    toast.push(`Количество увеличено: ${product.name} (${full.size})`)
+    toast.push(`Количество увеличено: ${product.name}${full.size ? ` (${full.size})` : ''}`)
   } else {
     const res = calculateDiscount(initialPrice, cartDiscountPercent.value)
     cart.value.push({
@@ -2440,7 +2772,7 @@ function selectVariant(variant) {
       discount_amount: res.discountAmount,
       quantity: 1,
     })
-    toast.push(`Добавлено в чек: ${product.name} (${full.size})`)
+    toast.push(`Добавлено в чек: ${product.name}${full.size ? ` (${full.size})` : ''}`)
   }
   saleStep.value = 'products'
   selectedProduct.value = null
@@ -2549,7 +2881,7 @@ async function submitQuickSale() {
       type: quickForm.value.type ? quickForm.value.type.trim() : null,
       category_id: quickForm.value.category_id || undefined,
       category_name: quickForm.value.category_name ? quickForm.value.category_name.trim() : undefined,
-      size: quickForm.value.size ? quickForm.value.size.trim() : '128',
+      size: isHat(quickForm.value.type, quickForm.value.name) ? '' : (quickForm.value.size ? quickForm.value.size.trim() : '128'),
       color: quickForm.value.color ? quickForm.value.color.trim() : null,
       original_price: origPrice,
       sale_price: Number(quickForm.value.sale_price) || 0,
@@ -2649,9 +2981,10 @@ function setHistoryDatePreset(key) {
   fetchHistory(1)
 }
 
-async function fetchHistory(page = 1) {
+async function fetchHistory(page = 1, append = false) {
   const params = {
     page,
+    per_page: 40,
     status: historyStatus.value || undefined,
     search: historySearch.value ? historySearch.value.trim() : undefined,
   }
@@ -2669,7 +3002,7 @@ async function fetchHistory(page = 1) {
   if (historyDateTo.value) {
     params.date_to = historyDateTo.value
   }
-  await sales.fetch(params)
+  await sales.fetch(params, append)
 }
 
 function duplicateSaleToCart(sale) {
@@ -2792,15 +3125,22 @@ async function downloadExcel() {
   }
 }
 
-async function confirmDeleteSale(sale) {
-  const label = formatSaleNumber(sale)
-  if (!confirm(`Вы действительно хотите удалить ${label}?`)) return
+function confirmDeleteSale(sale) {
+  saleToDelete.value = sale
+}
+
+async function executeDeleteSale() {
+  if (!saleToDelete.value) return
+  deleteSaving.value = true
+  const id = saleToDelete.value.id
   try {
-    const { data } = await sales.deleteSale(sale.id)
-    toast.push(data?.message || 'Удалено')
-    await refreshAll()
+    const { data } = await sales.deleteSale(id)
+    toast.push(data?.message || `Чек №${id} удален!`)
+    saleToDelete.value = null
   } catch (error) {
     toast.push(apiError(error), 'error')
+  } finally {
+    deleteSaving.value = false
   }
 }
 
@@ -2820,15 +3160,49 @@ function getSaleProductTitle(sale) {
   return `Чек №${sale.id}`
 }
 
+function getSaleItemsSummaryText(sale) {
+  if (!sale || !sale.items?.length) return 'Без товаров'
+  return sale.items
+    .map((i) => {
+      const name = i.product_name || i.product?.name || 'Товар'
+      const sz = i.variant_size && i.variant_size !== '—' && !isHat(i.product_type, name) ? ` (${i.variant_size})` : ''
+      return `${name}${sz} × ${i.quantity} шт.`
+    })
+    .join(', ')
+}
+
+function toggleSaleDetails(id) {
+  if (expandedSaleIds.value.has(id)) {
+    expandedSaleIds.value.delete(id)
+  } else {
+    expandedSaleIds.value.add(id)
+  }
+}
+
+function isSaleExpanded(id) {
+  return expandedSaleIds.value.has(id)
+}
+
 function openEditModal(sale) {
   editingSale.value = sale
   const at = sale.sold_at || sale.approved_at || sale.created_at
-  const initialDate = at ? at.slice(0, 10) : getTodayIsoDate()
+  let initialDateTime = ''
+  if (at) {
+    const d = new Date(at)
+    if (!isNaN(d.getTime())) {
+      const pad = (n) => String(n).padStart(2, '0')
+      initialDateTime = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    }
+  }
+  if (!initialDateTime) {
+    initialDateTime = new Date().toISOString().slice(0, 16)
+  }
+
   editDiscountPercent.value = Number(sale.discount_percent || 0)
 
   editForm.value = {
     is_on_order: Boolean(sale.is_on_order),
-    sold_at: initialDate,
+    sold_at: initialDateTime,
     due_date: sale.due_date ? sale.due_date.slice(0, 10) : '',
     fulfillment_status: sale.fulfillment_status || 'new',
     cashier_note: sale.cashier_note || '',
@@ -2852,15 +3226,22 @@ function openEditModal(sale) {
     }),
   }
   showAddEditItem.value = false
+  addEditItemMode.value = 'catalog'
   newItemProductId.value = ''
   newItemVariantId.value = ''
   newItemSize.value = ''
   newItemVariants.value = []
+  customEditName.value = ''
+  customEditType.value = ''
+  customEditSize.value = ''
+  customEditPrice.value = 0
+  customEditQty.value = 1
 }
 
 function closeEditModal() {
   editingSale.value = null
   showAddEditItem.value = false
+  showEditConfirmModal.value = false
 }
 
 function removeEditItem(idx) {
@@ -2891,12 +3272,15 @@ function confirmAddEditItem() {
   const v = newItemVariants.value.find((v) => Number(v.id) === Number(newItemVariantId.value))
   const origPrice = Number(v?.sale_price || prod.sale_price || 0)
   const disc = calculateDiscount(origPrice, editDiscountPercent.value)
+  const isHatItem = isHat(prod.type, prod.name)
+  const chosenSize = isHatItem ? '' : (newItemSize.value || v?.size || 'M')
+
   editForm.value.items.push({
     product_id: prod.id,
     product_variant_id: v?.id || null,
     product_name: prod.name,
     product_type: prod.type || '',
-    variant_size: newItemSize.value || v?.size || 'M',
+    variant_size: chosenSize,
     quantity: 1,
     original_price: origPrice,
     discount_percent: editDiscountPercent.value,
@@ -2911,14 +3295,55 @@ function confirmAddEditItem() {
   newItemVariants.value = []
 }
 
-async function saveEditSale() {
+function confirmAddCustomEditItem() {
+  const name = customEditName.value.trim()
+  if (!name) {
+    toast.push('Укажите название товара', 'warning')
+    return
+  }
+  const type = customEditType.value.trim() || 'Товар'
+  const isHatItem = isHat(type, name)
+  let size = customEditSize.value.trim()
+  if (isHatItem) {
+    size = ''
+  } else if (!size) {
+    toast.push('Укажите размер товара', 'warning')
+    return
+  }
+  const price = Math.max(0, Number(customEditPrice.value) || 0)
+  const qty = Math.max(1, Number(customEditQty.value) || 1)
+  const disc = calculateDiscount(price, editDiscountPercent.value)
+
+  editForm.value.items.push({
+    product_id: null,
+    product_variant_id: null,
+    product_name: name,
+    product_type: type,
+    variant_size: size,
+    quantity: qty,
+    original_price: price,
+    discount_percent: editDiscountPercent.value,
+    discount_amount: disc.discountAmount,
+    sale_price: disc.salePrice,
+    source: 'display',
+  })
+
+  showAddEditItem.value = false
+  customEditName.value = ''
+  customEditType.value = ''
+  customEditSize.value = ''
+  customEditPrice.value = 0
+  customEditQty.value = 1
+}
+
+function prepareSaveEditSale() {
   if (!editingSale.value) return
   if (!editForm.value.items.length) {
     toast.push('В чеке должен быть минимум 1 товар', 'warning')
     return
   }
   for (const it of editForm.value.items) {
-    if (!it.variant_size) {
+    if (!isHat(it.product_type, it.product_name) && !it.variant_size?.trim()) {
       toast.push(`Укажите размер для «${it.product_name}»`, 'warning')
       return
     }
@@ -2934,6 +3359,11 @@ async function saveEditSale() {
     }
   }
 
+  showEditConfirmModal.value = true
+}
+
+async function executeSaveEditSale() {
+  if (!editingSale.value) return
   editSaving.value = true
   try {
     await sales.updateSale(editingSale.value.id, {
@@ -2949,12 +3379,13 @@ async function saveEditSale() {
         const orig = Number(it.original_price ?? it.sale_price ?? 0)
         const pct = it.discount_percent !== undefined ? Number(it.discount_percent) : editDiscountPercent.value
         const disc = calculateDiscount(orig, pct)
+        const isHatItem = isHat(it.product_type, it.product_name)
         return {
           product_id: it.product_id || undefined,
           product_variant_id: it.product_variant_id || undefined,
           product_name: it.product_name.trim(),
           product_type: it.product_type ? it.product_type.trim() : undefined,
-          variant_size: it.variant_size.trim(),
+          variant_size: isHatItem ? (it.variant_size?.trim() || '') : (it.variant_size?.trim() || '—'),
           quantity: Math.max(1, Number(it.quantity) || 1),
           original_price: orig,
           discount_percent: pct,
@@ -2965,8 +3396,8 @@ async function saveEditSale() {
       }),
     })
     toast.push(`Чек №${editingSale.value.id} успешно изменен!`)
+    showEditConfirmModal.value = false
     closeEditModal()
-    await refreshAll()
     if (historyViewMode.value === 'summary') {
       await fetchSummaryData()
     }
@@ -2976,6 +3407,26 @@ async function saveEditSale() {
     editSaving.value = false
   }
 }
+
+function setupInfiniteScroll() {
+  if (sentinelObserver) sentinelObserver.disconnect()
+  if (!infiniteScrollSentinel.value) return
+
+  sentinelObserver = new IntersectionObserver((entries) => {
+    const entry = entries[0]
+    if (entry && entry.isIntersecting) {
+      if (!sales.loading && !sales.loadingMore && sales.meta && sales.meta.current_page < sales.meta.last_page) {
+        fetchHistory(sales.meta.current_page + 1, true)
+      }
+    }
+  }, { rootMargin: '300px' })
+
+  sentinelObserver.observe(infiniteScrollSentinel.value)
+}
+
+watch(infiniteScrollSentinel, () => {
+  setupInfiniteScroll()
+})
 
 async function fetchSummaryData() {
   summaryLoading.value = true
@@ -3105,11 +3556,19 @@ onMounted(() => {
 
   window.addEventListener('keydown', handleKeydown)
   refreshAll()
-  timer = window.setInterval(refreshAll, 15000)
+  nextTick(() => {
+    setupInfiniteScroll()
+  })
+  timer = window.setInterval(async () => {
+    await Promise.all([fetchProducts(), catalog.fetchCategories()])
+  }, 30000)
 
   onUnmounted(() => {
     window.removeEventListener('keydown', handleKeydown)
     window.clearInterval(timer)
+    if (sentinelObserver) {
+      sentinelObserver.disconnect()
+    }
   })
 })
 

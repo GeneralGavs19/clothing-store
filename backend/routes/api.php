@@ -50,6 +50,7 @@ Route::middleware('jwt')->group(function () {
         Route::post('stock/adjust', [StockController::class, 'adjust']);
 
         Route::get('reports/analytics', [ReportController::class, 'analytics']);
+        Route::get('reports/day-details', [ReportController::class, 'dayDetails']);
         Route::get('reports/backup', [ReportController::class, 'backup']);
         Route::post('reports/rebuild-statistics', [ReportController::class, 'rebuildStatistics']);
     });

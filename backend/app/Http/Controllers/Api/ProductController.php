@@ -330,6 +330,11 @@ class ProductController extends Controller
 
     private function validatedProductAndVariants(Request $request, ?Product $product = null): array
     {
+        $isHat = (
+            mb_stripos((string) ($request->input('type') ?? $product?->type ?? ''), 'шапк') !== false ||
+            mb_stripos((string) ($request->input('name') ?? $product?->name ?? ''), 'шапк') !== false
+        );
+
         $productRules = [
             'category_id' => ['nullable', 'exists:categories,id'],
             'type' => ['nullable', 'string', 'max:100'],
@@ -342,7 +347,7 @@ class ProductController extends Controller
             'photo' => ['nullable', 'image', 'max:4096'],
             'variants' => ['required', 'array', 'min:1'],
             'variants.*.id' => ['nullable', 'integer', 'exists:product_variants,id'],
-            'variants.*.size' => ['required', 'string', 'max:64'],
+            'variants.*.size' => [$isHat ? 'nullable' : 'required', 'string', 'max:64'],
             'variants.*.stock_store' => ['nullable', 'integer', 'min:0'],
             'variants.*.stock_warehouse' => ['nullable', 'integer', 'min:0'],
             'variants.*.quantity' => ['nullable', 'integer', 'min:0'],
