@@ -2,7 +2,6 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -12,10 +11,17 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Вспомогательная функция для безопасного создания индексов в SQLite/MySQL
+        // Кросс-СУБД функция для безопасного создания индексов (MySQL, SQLite, PostgreSQL)
         $createIndex = function (string $table, string $indexName, array $columns) {
-            $colsStr = implode('", "', $columns);
-            DB::statement("CREATE INDEX IF NOT EXISTS \"{$indexName}\" ON \"{$table}\" (\"{$colsStr}\")");
+            try {
+                if (!Schema::hasIndex($table, $indexName)) {
+                    Schema::table($table, function (Blueprint $blueprint) use ($columns, $indexName) {
+                        $blueprint->index($columns, $indexName);
+                    });
+                }
+            } catch (\Throwable $e) {
+                // Игнорируем, если индекс уже существует
+            }
         };
 
         // 1. Индексы таблицы sales для быстрой сортировки, диапазонных выборок и фильтров
@@ -44,7 +50,15 @@ return new class extends Migration
     public function down(): void
     {
         $dropIndex = function (string $table, string $indexName) {
-            DB::statement("DROP INDEX IF EXISTS \"{$indexName}\"");
+            try {
+                if (Schema::hasIndex($table, $indexName)) {
+                    Schema::table($table, function (Blueprint $blueprint) use ($indexName) {
+                        $blueprint->dropIndex($indexName);
+                    });
+                }
+            } catch (\Throwable $e) {
+                // Игнорируем, если индекс не найден
+            }
         };
 
         $dropIndex('sales', 'idx_sales_approved_at_id');
