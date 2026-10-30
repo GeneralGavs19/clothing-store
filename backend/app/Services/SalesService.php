@@ -986,17 +986,39 @@ class SalesService
             $quantity = max(1, (int) ($data['quantity'] ?? 1));
             $remainingStock = max(0, (int) ($data['remaining_stock'] ?? 0));
 
+            // Автоопределение головных уборов (Шапка) для предотвращения дублирования карточек товаров
+            $isHat = (bool) preg_match('/(шапк|кепк|панам|бейсболк|hat|cap)/iu', $name . ' ' . ($type ?? ''));
+            if ($isHat) {
+                $type = 'Шапка';
+                $size = '';
+                if (! $categoryId) {
+                    $hatCat = Category::where('id', 29)->first()
+                        ?: Category::all()->first(fn ($c) => mb_stripos($c->name, 'шапк') !== false);
+                    $categoryId = $hatCat?->id;
+                }
+            }
+
             // Check if product exists (case-insensitive & trimmed to prevent duplicates)
             $productQuery = Product::query()->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower($name)]);
-            if ($categoryId) {
-                $productQuery->where('category_id', $categoryId);
-            }
-            if ($type) {
-                $productQuery->where(function ($tq) use ($type) {
-                    $tq->whereRaw('LOWER(TRIM(type)) = ?', [mb_strtolower($type)])
-                       ->orWhereNull('type')
-                       ->orWhere('type', '');
-                });
+            if ($isHat) {
+                // Для шапок всегда находим единый канонический товар в каталоге
+                if ($categoryId) {
+                    $productQuery->where(function ($cq) use ($categoryId) {
+                        $cq->where('category_id', $categoryId)
+                           ->orWhereNull('category_id');
+                    });
+                }
+            } else {
+                if ($categoryId) {
+                    $productQuery->where('category_id', $categoryId);
+                }
+                if ($type) {
+                    $productQuery->where(function ($tq) use ($type) {
+                        $tq->whereRaw('LOWER(TRIM(type)) = ?', [mb_strtolower($type)])
+                           ->orWhereNull('type')
+                           ->orWhere('type', '');
+                    });
+                }
             }
             if ($color) {
                 $productQuery->where(function ($cq) use ($color) {

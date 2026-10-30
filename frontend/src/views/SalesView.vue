@@ -2437,7 +2437,14 @@ function isHat(type, name) {
 function setQuickName(name) {
   quickForm.value.name = name
   const lower = name.toLowerCase()
-  if (lower.includes('поло')) {
+  if (lower.includes('шапк') || lower.includes('кепк') || lower.includes('панам')) {
+    quickForm.value.type = 'Шапка'
+    quickForm.value.size = ''
+    const hatCat = catalog.categories.find((c) => c.name.toLowerCase().includes('шапк'))
+    if (hatCat) {
+      quickForm.value.category_id = hatCat.id
+    }
+  } else if (lower.includes('поло')) {
     quickForm.value.type = 'Поло'
   } else if (lower.includes('брюки')) {
     quickForm.value.type = 'Брюки'
@@ -2449,8 +2456,6 @@ function setQuickName(name) {
     quickForm.value.type = 'Футболка'
   } else if (lower.includes('шорт')) {
     quickForm.value.type = 'Шорты'
-  } else if (lower.includes('шапк')) {
-    quickForm.value.type = 'Шапки'
   }
 }
 
@@ -2466,7 +2471,7 @@ const commonColors = [
 
 // Виды товаров (существующие + формы)
 const popularTypes = [
-  'Шапки',
+  'Шапка',
   'Футболка',
   'Худи',
   'Свитшот',
@@ -2509,6 +2514,19 @@ const quickForm = ref({
 
 watch(() => quickForm.value.sold_at, (val) => {
   if (val) updateLastUsedDate(val)
+})
+
+watch(() => quickForm.value.name, (newName) => {
+  if (!newName) return
+  const lower = newName.toLowerCase().trim()
+  if (lower.includes('шапк') || lower.includes('кепк') || lower.includes('панам')) {
+    quickForm.value.type = 'Шапка'
+    quickForm.value.size = ''
+    const hatCat = catalog.categories.find((c) => c.name.toLowerCase().includes('шапк'))
+    if (hatCat) {
+      quickForm.value.category_id = hatCat.id
+    }
+  }
 })
 
 // Единая функция расчёта скидки (по формуле из ТЗ:

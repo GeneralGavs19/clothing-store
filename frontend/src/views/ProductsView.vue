@@ -363,7 +363,7 @@ const importing = ref(false)
 const editing = ref(null)
 const variantTableRef = ref(null)
 const popularTypes = [
-  'Шапки',
+  'Шапка',
   'Футболка',
   'Худи',
   'Свитшот',
