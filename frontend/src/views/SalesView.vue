@@ -3116,7 +3116,7 @@ async function downloadExcel() {
     const blob = new Blob([res.data])
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
-    link.download = `sales-report-${new Date().toISOString().slice(0, 10)}.xlsx`
+    link.download = `1C-sales-report-${new Date().toISOString().slice(0, 10)}.xlsx`
     link.click()
     URL.revokeObjectURL(link.href)
     toast.push('Excel отчет успешно сформирован и скачан!')
