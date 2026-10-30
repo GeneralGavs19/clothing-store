@@ -22,6 +22,8 @@ function appendVariantRow(form, variant, index) {
   form.append(`variants[${index}][position]`, String(index))
 }
 
+let currentProductsController = null
+
 export const useCatalogStore = defineStore('catalog', {
   state: () => ({
     products: [],
@@ -41,11 +43,23 @@ export const useCatalogStore = defineStore('catalog', {
       return data
     },
     async fetchProducts(params = {}) {
+      if (currentProductsController) {
+        currentProductsController.abort()
+      }
+      currentProductsController = new AbortController()
       this.loadingProducts = true
       try {
-        const { data } = await api.get('/products', { params })
+        const { data } = await api.get('/products', {
+          params,
+          signal: currentProductsController.signal,
+        })
         this.products = data.data
         this.productMeta = data.meta
+      } catch (error) {
+        if (error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED') {
+          return
+        }
+        throw error
       } finally {
         this.loadingProducts = false
       }

@@ -24,6 +24,7 @@ api.interceptors.response.use(
 )
 
 export function apiError(error) {
+  if (axios.isCancel(error) || error?.name === 'CanceledError') return ''
   const data = error.response?.data
   if (data?.errors) return Object.values(data.errors).flat().join(' ')
   const message = data?.message || error.message || 'Ошибка запроса'

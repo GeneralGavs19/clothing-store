@@ -20,13 +20,32 @@ class DashboardController extends Controller
     {
         $range = $this->chartRange();
         $chartStartUtc = $range['start_utc'];
-        $approved = Sale::query()->where('status', 'approved');
 
-        $todayApproved = (clone $approved)->whereDate('approved_at', today());
-        $todayCount = (int) (clone $todayApproved)->count();
-        $todayRev = (float) (clone $todayApproved)->sum('subtotal');
+        $todayStart = today()->startOfDay();
+        $todayEnd = today()->endOfDay();
+
+        // 1. Сводные метрики по всем утвержденным продажам (один оптимизированный SQL-запрос)
+        $overallStats = Sale::query()
+            ->where('status', 'approved')
+            ->selectRaw('COUNT(*) as approved_count, COALESCE(SUM(subtotal), 0) as total_rev, COALESCE(SUM(profit), 0) as total_prof')
+            ->first();
+
+        // 2. Метрики за сегодня через B-tree диапазонный индекс
+        $todayStats = Sale::query()
+            ->where('status', 'approved')
+            ->where(function ($q) use ($todayStart, $todayEnd) {
+                $q->whereBetween('approved_at', [$todayStart->toIso8601String(), $todayEnd->toIso8601String()])
+                  ->orWhereBetween('approved_at', [$todayStart->toDateTimeString(), $todayEnd->toDateTimeString()]);
+            })
+            ->selectRaw('COUNT(*) as today_count, COALESCE(SUM(subtotal), 0) as today_rev, COALESCE(SUM(profit), 0) as today_prof')
+            ->first();
+
+        $todayCount = (int) ($todayStats->today_count ?? 0);
+        $todayRev = (float) ($todayStats->today_rev ?? 0);
+        $todayProfit = (float) ($todayStats->today_prof ?? 0);
         $todayAvgCheck = $todayCount > 0 ? round($todayRev / $todayCount, 2) : 0.0;
 
+        // 3. Активные заказы под пошив (выборочная проекция колонок)
         $activeOrders = Sale::query()
             ->where('is_on_order', true)
             ->where('status', 'approved')
@@ -34,38 +53,68 @@ class DashboardController extends Controller
                 $q->whereNull('fulfillment_status')
                     ->orWhereIn('fulfillment_status', ['new', 'in_progress', 'ready']);
             })
-            ->with(['items', 'cashier'])
+            ->with(['items:id,sale_id,product_name,variant_size,quantity,sale_price,line_total', 'cashier:id,name'])
             ->orderByRaw('CASE WHEN due_date IS NULL THEN 1 ELSE 0 END')
             ->orderBy('due_date', 'asc')
             ->orderBy('approved_at', 'desc')
             ->limit(10)
             ->get();
 
+        // 4. Последние чеки за сегодня
         $todayRecentSales = Sale::query()
             ->where('status', 'approved')
-            ->whereDate('approved_at', today())
-            ->with(['items', 'cashier'])
+            ->where(function ($q) use ($todayStart, $todayEnd) {
+                $q->whereBetween('approved_at', [$todayStart->toIso8601String(), $todayEnd->toIso8601String()])
+                  ->orWhereBetween('approved_at', [$todayStart->toDateTimeString(), $todayEnd->toDateTimeString()]);
+            })
+            ->with(['items:id,sale_id,product_name,variant_size,quantity,sale_price,line_total', 'cashier:id,name'])
             ->latest('approved_at')
             ->limit(8)
             ->get();
 
+        // 5. Выручка за неделю и месяц через диапазонные индексы
+        $weekStart = now()->startOfWeek();
+        $weekEnd = now()->endOfWeek();
+        $weekRevenue = (float) Sale::query()
+            ->where('status', 'approved')
+            ->where(function ($q) use ($weekStart, $weekEnd) {
+                $q->whereBetween('approved_at', [$weekStart->toIso8601String(), $weekEnd->toIso8601String()])
+                  ->orWhereBetween('approved_at', [$weekStart->toDateTimeString(), $weekEnd->toDateTimeString()]);
+            })
+            ->sum('subtotal');
+
+        $monthStart = now()->startOfMonth();
+        $monthEnd = now()->endOfMonth();
+        $monthRevenue = (float) Sale::query()
+            ->where('status', 'approved')
+            ->where(function ($q) use ($monthStart, $monthEnd) {
+                $q->whereBetween('approved_at', [$monthStart->toIso8601String(), $monthEnd->toIso8601String()])
+                  ->orWhereBetween('approved_at', [$monthStart->toDateTimeString(), $monthEnd->toDateTimeString()]);
+            })
+            ->sum('subtotal');
+
+        // 6. Метрики каталога товаров за один запрос
+        $productStats = Product::query()
+            ->selectRaw('COUNT(*) as products_count, COALESCE(SUM(stock_quantity), 0) as stock_units, COALESCE(SUM(display_quantity), 0) as display_units, SUM(CASE WHEN (stock_quantity + display_quantity) <= low_stock_threshold THEN 1 ELSE 0 END) as low_stock_count')
+            ->first();
+
         $summary = [
-            'total_profit' => (float) (clone $approved)->sum('profit'),
-            'total_revenue' => (float) (clone $approved)->sum('subtotal'),
-            'approved_sales' => (int) (clone $approved)->count(),
+            'total_profit' => (float) ($overallStats->total_prof ?? 0),
+            'total_revenue' => (float) ($overallStats->total_rev ?? 0),
+            'approved_sales' => (int) ($overallStats->approved_count ?? 0),
             'pending_sales' => (int) Sale::query()->where('status', 'pending')->count(),
             'today_sales' => $todayCount,
             'today_revenue' => $todayRev,
             'today_avg_check' => $todayAvgCheck,
-            'today_profit' => (float) (clone $approved)->whereDate('approved_at', today())->sum('profit'),
+            'today_profit' => $todayProfit,
             'today_items_sold' => $this->todayItemsSold(),
             'active_orders_count' => $activeOrders->count(),
-            'week_revenue' => (float) (clone $approved)->whereBetween('approved_at', [now()->startOfWeek(), now()->endOfWeek()])->sum('subtotal'),
-            'month_revenue' => (float) (clone $approved)->whereMonth('approved_at', now()->month)->whereYear('approved_at', now()->year)->sum('subtotal'),
-            'products' => (int) Product::query()->count(),
-            'low_stock' => (int) Product::query()->whereRaw('(stock_quantity + display_quantity) <= low_stock_threshold')->count(),
-            'stock_units' => (int) Product::query()->sum('stock_quantity'),
-            'display_units' => (int) Product::query()->sum('display_quantity'),
+            'week_revenue' => $weekRevenue,
+            'month_revenue' => $monthRevenue,
+            'products' => (int) ($productStats->products_count ?? 0),
+            'low_stock' => (int) ($productStats->low_stock_count ?? 0),
+            'stock_units' => (int) ($productStats->stock_units ?? 0),
+            'display_units' => (int) ($productStats->display_units ?? 0),
         ];
 
         $salesByDay = $this->aggregateSalesByLocalDay($chartStartUtc);

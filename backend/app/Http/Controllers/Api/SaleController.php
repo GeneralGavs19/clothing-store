@@ -14,7 +14,17 @@ class SaleController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Sale::query()->with(['items.product.category', 'cashier', 'approver'])->latest();
+        // Оптимизированная выборка: исключаем лишние JOIN категорий и неиспользуемые поля
+        $query = Sale::query()->with([
+            'items' => fn ($iq) => $iq->select([
+                'id', 'sale_id', 'product_id', 'product_variant_id', 'product_name', 'product_type',
+                'variant_size', 'quantity', 'original_price', 'sale_price', 'discount_percent',
+                'discount_amount', 'line_total', 'is_on_order', 'source_location',
+            ]),
+            'items.product:id,name,type',
+            'cashier:id,name',
+            'approver:id,name',
+        ]);
 
         if ($request->user()->isCashier()) {
             $query->where('cashier_id', $request->user()->id);
@@ -26,11 +36,21 @@ class SaleController extends Controller
         if ($request->filled('cashier_id') && $request->user()->isAdmin()) {
             $query->where('cashier_id', $request->integer('cashier_id'));
         }
+
+        // Диапазон дат через B-tree индекс (вместо whereDate, вызывающего full-table scan)
         if ($request->filled('date_from')) {
-            $query->whereDate('approved_at', '>=', $request->date('date_from'));
+            $fromDate = \Illuminate\Support\Carbon::parse($request->string('date_from')->toString())->startOfDay();
+            $query->where(function ($q) use ($fromDate) {
+                $q->where('approved_at', '>=', $fromDate->toIso8601String())
+                  ->orWhere('approved_at', '>=', $fromDate->toDateTimeString());
+            });
         }
         if ($request->filled('date_to')) {
-            $query->whereDate('approved_at', '<=', $request->date('date_to'));
+            $toDate = \Illuminate\Support\Carbon::parse($request->string('date_to')->toString())->endOfDay();
+            $query->where(function ($q) use ($toDate) {
+                $q->where('approved_at', '<=', $toDate->toIso8601String())
+                  ->orWhere('approved_at', '<=', $toDate->toDateTimeString());
+            });
         }
 
         if ($search = $request->string('search')->trim()->toString()) {
@@ -58,9 +78,19 @@ class SaleController extends Controller
             $query->where('fulfillment_status', $request->string('fulfillment_status')->toString());
         }
 
+        // Поддержка cursor-based pagination для мгновенного скролла ленты без OFFSET
+        if ($request->filled('cursor_before_id')) {
+            $query->where('id', '<', $request->integer('cursor_before_id'));
+        }
+
         $query->orderByDesc('approved_at')->orderByDesc('id');
 
-        return response()->json(ApiPagination::format($query->paginate($request->integer('per_page', 15))));
+        $paginator = $query->paginate($request->integer('per_page', 40));
+        $formatted = ApiPagination::format($paginator);
+        $lastItem = ! empty($formatted['data']) ? end($formatted['data']) : null;
+        $formatted['meta']['next_cursor_id'] = $lastItem ? $lastItem->id : null;
+
+        return response()->json($formatted);
     }
 
     public function store(Request $request, SalesService $sales, ActivityLogger $logger, TelegramService $telegram)

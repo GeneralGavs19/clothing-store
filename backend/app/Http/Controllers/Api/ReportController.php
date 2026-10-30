@@ -46,8 +46,20 @@ class ReportController extends Controller
                 $isOnOrder = filter_var($request->input('is_on_order'), FILTER_VALIDATE_BOOLEAN);
                 $q->where('is_on_order', $isOnOrder);
             })
-            ->when($request->filled('date_from'), fn ($q) => $q->whereDate('approved_at', '>=', $request->date('date_from')))
-            ->when($request->filled('date_to'), fn ($q) => $q->whereDate('approved_at', '<=', $request->date('date_to')))
+            ->when($request->filled('date_from'), function ($q) use ($request) {
+                $from = Carbon::parse($request->input('date_from'))->startOfDay();
+                $q->where(function ($sq) use ($from) {
+                    $sq->where('approved_at', '>=', $from->toIso8601String())
+                       ->orWhere('approved_at', '>=', $from->toDateTimeString());
+                });
+            })
+            ->when($request->filled('date_to'), function ($q) use ($request) {
+                $to = Carbon::parse($request->input('date_to'))->endOfDay();
+                $q->where(function ($sq) use ($to) {
+                    $sq->where('approved_at', '<=', $to->toIso8601String())
+                       ->orWhere('approved_at', '<=', $to->toDateTimeString());
+                });
+            })
             ->orderByDesc('approved_at')
             ->orderByDesc('id');
 
@@ -814,14 +826,36 @@ class ReportController extends Controller
 
         $logger->log('reports.statistics_rebuilt', null, ['days' => $rows->count()], $request);
 
+        \App\Services\AnalyticsCacheService::invalidate();
+
         return response()->json(['message' => 'Statistics rebuilt.', 'days' => $rows->count()]);
     }
 
     /**
      * Основной аналитический метод для панели «Отчёты».
-     * Строго опирается на фактические продажи. Не генерирует вымышленные остатки склада.
+     * Строго опирается на фактические продажи. Кэширует частые агрегаты и мгновенно сбрасывает кэш при новых продажах.
      */
     public function analytics(Request $request)
+    {
+        $cacheParams = [
+            'date_from' => $request->input('date_from'),
+            'date_to' => $request->input('date_to'),
+            'order_type' => $request->input('order_type'),
+            'is_on_order' => $request->input('is_on_order'),
+            'category_id' => $request->input('category_id'),
+            'type' => $request->input('type'),
+            'size' => $request->input('size'),
+            'search' => $request->input('search'),
+        ];
+
+        $data = \App\Services\AnalyticsCacheService::remember($cacheParams, function () use ($request) {
+            return $this->computeAnalyticsData($request);
+        });
+
+        return response()->json($data);
+    }
+
+    private function computeAnalyticsData(Request $request): array
     {
         $dateFromStr = $request->filled('date_from') ? $request->string('date_from')->toString() : null;
         $dateToStr = $request->filled('date_to') ? $request->string('date_to')->toString() : null;
@@ -849,10 +883,16 @@ class ReportController extends Controller
             ->where('sales.status', 'approved');
 
         if ($dateFrom) {
-            $salesQuery->where('sales.approved_at', '>=', $dateFrom);
+            $salesQuery->where(function ($q) use ($dateFrom) {
+                $q->where('sales.approved_at', '>=', $dateFrom->toIso8601String())
+                  ->orWhere('sales.approved_at', '>=', $dateFrom->toDateTimeString());
+            });
         }
         if ($dateTo) {
-            $salesQuery->where('sales.approved_at', '<=', $dateTo);
+            $salesQuery->where(function ($q) use ($dateTo) {
+                $q->where('sales.approved_at', '<=', $dateTo->toIso8601String())
+                  ->orWhere('sales.approved_at', '<=', $dateTo->toDateTimeString());
+            });
         }
 
         if ($orderType === 'on_order') {
@@ -975,8 +1015,10 @@ class ReportController extends Controller
                 ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
                 ->leftJoin('products', 'products.id', '=', 'sale_items.product_id')
                 ->where('sales.status', 'approved')
-                ->where('sales.approved_at', '>=', $prevPeriodFrom)
-                ->where('sales.approved_at', '<=', $prevPeriodTo);
+                ->where(function ($q) use ($prevPeriodFrom, $prevPeriodTo) {
+                    $q->whereBetween('sales.approved_at', [$prevPeriodFrom->toIso8601String(), $prevPeriodTo->toIso8601String()])
+                      ->orWhereBetween('sales.approved_at', [$prevPeriodFrom->toDateTimeString(), $prevPeriodTo->toDateTimeString()]);
+                });
 
             if ($orderType === 'on_order') {
                 $prevSalesQuery->where(function ($q) {
@@ -1521,7 +1563,7 @@ class ReportController extends Controller
         $sortedSizes = $this->sortSizes($rawSizes);
         $availableSizes = array_map(fn ($s) => $s['size'], $sortedSizes);
 
-        return response()->json([
+        return [
             'summary' => [
                 'total_sold_items' => $totalSoldUnits,
                 'in_stock_units' => $inStockUnits,
@@ -1553,7 +1595,7 @@ class ReportController extends Controller
                 'search' => $searchTerm,
             ],
             'generated_at' => now()->toIso8601String(),
-        ]);
+        ];
     }
 
     /**

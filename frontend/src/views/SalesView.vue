@@ -1143,7 +1143,7 @@
           <div
             v-for="sale in sales.sales"
             :key="sale.id"
-            class="p-3.5 sm:p-4 transition hover:bg-slate-50/60 dark:hover:bg-slate-900/40"
+            class="p-3.5 sm:p-4 transition hover:bg-slate-50/60 dark:hover:bg-slate-900/40 [content-visibility:auto] [contain-intrinsic-size:120px]"
           >
             <!-- Карточка чека в ленте -->
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

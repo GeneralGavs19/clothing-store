@@ -821,6 +821,7 @@ class SalesService
             }
 
             Cache::forget('daily_stats_last_14');
+            \App\Services\AnalyticsCacheService::invalidate();
         } catch (\Throwable) {
             //
         }
@@ -849,6 +850,7 @@ class SalesService
             }
 
             Cache::forget('daily_stats_last_14');
+            \App\Services\AnalyticsCacheService::invalidate();
         } catch (\Throwable) {
             //
         }
