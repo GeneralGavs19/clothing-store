@@ -28,7 +28,26 @@ class ProductController extends Controller
             ])
             ->withSum([
                 'saleItems as total_sold' => fn ($q) => $q->whereHas('sale', fn ($sq) => $sq->where('status', 'approved')),
+            ], 'quantity')
+            ->withSum([
+                'saleItems as new_batch_sold' => fn ($q) => $q->whereHas('sale', fn ($sq) => $sq->where('status', 'approved')->where(function ($ssq) {
+                    $ssq->where('cashier_note', 'like', '%завоз%')
+                        ->orWhere('cashier_note', 'like', '%Завоз%');
+                })),
             ], 'quantity');
+
+        $batchType = $request->input('batch_type', 'standard'); // 'standard' | 'new_batch' | 'all'
+        if ($batchType === 'all') {
+            $query->where('status', '!=', 'archived');
+        } elseif ($batchType === 'new_batch') {
+            $query->where('batch_type', 'new_batch')->where('status', '!=', 'archived');
+        } else {
+            // Default to 'standard' (regular catalog)
+            $query->where(function ($q) {
+                $q->where('batch_type', 'standard')
+                  ->orWhereNull('batch_type');
+            })->where('status', '!=', 'archived');
+        }
 
         if ($search = $request->string('search')->trim()->toString()) {
             $query->where(fn ($q) => $q->where('name', 'like', "%{$search}%")
@@ -36,6 +55,7 @@ class ProductController extends Controller
                 ->orWhere('brand', 'like', "%{$search}%")
                 ->orWhere('description', 'like', "%{$search}%")
                 ->orWhere('color', 'like', "%{$search}%")
+                ->orWhere('batch_note', 'like', "%{$search}%")
                 ->orWhereHas('variants', function ($vq) use ($search) {
                     $vq->where('sku', 'like', "%{$search}%")
                         ->orWhere('size', 'like', "%{$search}%")
@@ -68,10 +88,19 @@ class ProductController extends Controller
 
         $sort = $request->string('sort', 'updated_at')->toString();
         $direction = $request->string('direction', 'desc')->lower()->toString() === 'asc' ? 'asc' : 'desc';
-        $allowedSorts = ['name', 'sale_price', 'stock_quantity', 'display_quantity', 'updated_at', 'created_at'];
+        $allowedSorts = ['name', 'sale_price', 'stock_quantity', 'display_quantity', 'updated_at', 'created_at', 'total_sold', 'new_batch_sold', 'batch_period'];
         $query->orderBy(in_array($sort, $allowedSorts, true) ? $sort : 'updated_at', $direction);
 
-        return response()->json(ApiPagination::format($query->paginate($request->integer('per_page', 12))));
+        $paginated = $query->paginate($request->integer('per_page', 12));
+        $result = ApiPagination::format($paginated);
+        $result['meta']['batch_counters'] = [
+            'standard' => Product::where(function ($q) {
+                $q->where('batch_type', 'standard')->orWhereNull('batch_type');
+            })->where('status', '!=', 'archived')->count(),
+            'new_batch' => Product::where('batch_type', 'new_batch')->where('status', '!=', 'archived')->count(),
+        ];
+
+        return response()->json($result);
     }
 
     public function store(Request $request, ActivityLogger $logger)
@@ -81,8 +110,12 @@ class ProductController extends Controller
         $name = trim($payload['name'] ?? '');
         $color = trim($payload['color'] ?? '');
         $catId = $payload['category_id'] ?? null;
+        $targetBatchType = $payload['batch_type'] ?? 'standard';
 
-        $existingQuery = Product::query()->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower($name)]);
+        $existingQuery = Product::query()
+            ->where('status', '!=', 'archived')
+            ->where('batch_type', $targetBatchType)
+            ->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower($name)]);
         if ($catId) {
             $existingQuery->where('category_id', $catId);
         }
@@ -92,9 +125,14 @@ class ProductController extends Controller
         $existing = $existingQuery->first();
 
         if ($existing) {
+            $batchLabel = $targetBatchType === 'new_batch' ? 'новом завозе' : 'основном каталоге';
             throw ValidationException::withMessages([
-                'name' => "Товар с названием «{$existing->name}» уже существует в каталоге (ID: {$existing->id}). Добавьте нужные размеры в существующую модель, чтобы не создавать дубликаты.",
+                'name' => "Товар с названием «{$existing->name}» уже существует в {$batchLabel} (ID: {$existing->id}). Добавьте нужные размеры в существующую модель, чтобы не создавать дубликаты.",
             ]);
+        }
+
+        if ($targetBatchType === 'new_batch' && empty($payload['batch_period'])) {
+            $payload['batch_period'] = now()->format('d.m.Y');
         }
 
         $product = DB::transaction(function () use ($request, $payload) {
@@ -202,6 +240,257 @@ class ProductController extends Controller
             'message' => $hadSales
                 ? 'Товар удалён. История продаж сохранена.'
                 : 'Товар удалён.',
+        ]);
+    }
+
+    /**
+     * Счётчики товаров по типу завоза (основной ассортимент vs новый завоз).
+     */
+    public function batchCounters()
+    {
+        return response()->json([
+            'standard' => Product::where(function ($q) {
+                $q->where('batch_type', 'standard')->orWhereNull('batch_type');
+            })->where('status', '!=', 'archived')->count(),
+            'new_batch' => Product::where('batch_type', 'new_batch')->where('status', '!=', 'archived')->count(),
+        ]);
+    }
+
+    /**
+     * Поиск кандидатов на объединение в основном ассортименте для товара нового завоза.
+     */
+    public function mergeCandidates(Product $product)
+    {
+        $type = trim((string) $product->type);
+
+        $candidates = Product::query()
+            ->where(function ($q) {
+                $q->where('batch_type', 'standard')->orWhereNull('batch_type');
+            })
+            ->where('status', '!=', 'archived')
+            ->where('id', '!=', $product->id)
+            ->with(['category', 'variants'])
+            ->withSum([
+                'saleItems as total_sold' => fn ($q) => $q->whereHas('sale', fn ($sq) => $sq->where('status', 'approved')),
+            ], 'quantity')
+            ->when($type !== '', function ($q) use ($type) {
+                $q->orderByRaw("CASE WHEN LOWER(TRIM(type)) = LOWER(?) THEN 0 ELSE 1 END", [$type]);
+            })
+            ->orderBy('name')
+            ->limit(30)
+            ->get();
+
+        return response()->json($candidates);
+    }
+
+    /**
+     * Перенос товара из нового завоза в основной завоз (как новый товар либо объединение с существующим).
+     */
+    public function transferToStandard(Request $request, Product $product, ActivityLogger $logger)
+    {
+        $mode = $request->input('mode', 'as_new'); // 'as_new' | 'merge'
+
+        if ($mode === 'merge') {
+            $targetId = $request->integer('target_product_id');
+            $targetProduct = Product::with('variants')->findOrFail($targetId);
+
+            if ($targetProduct->id === $product->id) {
+                throw ValidationException::withMessages([
+                    'target_product_id' => 'Нельзя объединить товар с самим собой.',
+                ]);
+            }
+
+            return DB::transaction(function () use ($product, $targetProduct, $request, $logger) {
+                $product->load('variants');
+
+                foreach ($product->variants as $srcVar) {
+                    $existingVar = $targetProduct->variants->first(function ($tv) use ($srcVar) {
+                        return mb_strtolower(trim($tv->size ?? '')) === mb_strtolower(trim($srcVar->size ?? ''));
+                    });
+
+                    if (! $existingVar) {
+                        $newVar = ProductVariant::create([
+                            'product_id' => $targetProduct->id,
+                            'size' => $srcVar->size,
+                            'sku' => $this->ensureUniqueSku($srcVar->sku ? $srcVar->sku . '-M' : "SKU-{$targetProduct->id}-{$srcVar->size}"),
+                            'barcode' => null,
+                            'stock_warehouse' => (int) $srcVar->stock_warehouse,
+                            'stock_store' => (int) $srcVar->stock_store,
+                            'sale_price' => $srcVar->sale_price ?: $targetProduct->sale_price,
+                            'purchase_price' => $srcVar->purchase_price ?: $targetProduct->purchase_price,
+                            'position' => $targetProduct->variants->count() + 1,
+                        ]);
+                        $destVarId = $newVar->id;
+                    } else {
+                        $destVarId = $existingVar->id;
+                    }
+
+                    // Move product items if any
+                    DB::table('product_items')
+                        ->where('product_variant_id', $srcVar->id)
+                        ->update(['product_variant_id' => $destVarId]);
+
+                    // Move sale items safely
+                    DB::table('sale_items')
+                        ->where('product_id', $product->id)
+                        ->where('product_variant_id', $srcVar->id)
+                        ->update([
+                            'product_id' => $targetProduct->id,
+                            'product_variant_id' => $destVarId,
+                        ]);
+                }
+
+                // Move any remaining sale items for this product
+                DB::table('sale_items')
+                    ->where('product_id', $product->id)
+                    ->update([
+                        'product_id' => $targetProduct->id,
+                    ]);
+
+                // Move stock movements
+                DB::table('stock_movements')
+                    ->where('product_id', $product->id)
+                    ->update([
+                        'product_id' => $targetProduct->id,
+                    ]);
+
+                // Archive the source product and record audit metadata
+                $product->update([
+                    'batch_type' => 'merged',
+                    'status' => 'archived',
+                    'merged_into_id' => $targetProduct->id,
+                    'transferred_at' => now(),
+                    'transferred_by' => $request->user()->id,
+                ]);
+
+                // Re-apply aggregates on target
+                $targetProduct->refresh();
+                $targetProduct->load('variants');
+                $targetProduct->applyAggregatesFromVariants();
+                $targetProduct->save();
+
+                \App\Services\AnalyticsCacheService::invalidate();
+
+                $logger->log('products.merged', $targetProduct, [
+                    'source_product_id' => $product->id,
+                    'source_product_name' => $product->name,
+                    'target_product_id' => $targetProduct->id,
+                    'target_product_name' => $targetProduct->name,
+                ], $request);
+
+                return response()->json([
+                    'message' => "Товар «{$product->name}» успешно объединён с «{$targetProduct->name}».",
+                    'product' => $targetProduct,
+                ]);
+            });
+        }
+
+        // Mode: 'as_new'
+        return DB::transaction(function () use ($product, $request, $logger) {
+            $updateData = [
+                'batch_type' => 'standard',
+                'transferred_at' => now(),
+                'transferred_by' => $request->user()->id,
+            ];
+
+            if ($request->filled('name')) {
+                $updateData['name'] = trim($request->string('name')->toString());
+            }
+            if ($request->filled('type')) {
+                $updateData['type'] = trim($request->string('type')->toString());
+            }
+            if ($request->filled('color')) {
+                $updateData['color'] = trim($request->string('color')->toString());
+            }
+            if ($request->filled('sale_price')) {
+                $updateData['sale_price'] = (float) $request->input('sale_price');
+            }
+            if ($request->filled('category_id')) {
+                $updateData['category_id'] = $request->integer('category_id');
+            }
+
+            $product->update($updateData);
+
+            if ($request->has('variants') && is_array($request->input('variants'))) {
+                $this->syncVariants($product, $request->input('variants'), $request, app(ProductItemService::class));
+                $product->applyAggregatesFromVariants();
+                $product->save();
+            }
+
+            \App\Services\AnalyticsCacheService::invalidate();
+
+            $logger->log('products.transferred_to_standard', $product, [
+                'product_id' => $product->id,
+                'name' => $product->name,
+            ], $request);
+
+            return response()->json([
+                'message' => "Товар «{$product->name}» успешно перенесён в основной завоз.",
+                'product' => $product->load(['category', 'variants']),
+            ]);
+        });
+    }
+
+    /**
+     * Массовый перенос нескольких выбранных товаров из нового завоза в основной.
+     */
+    public function bulkTransfer(Request $request, ActivityLogger $logger)
+    {
+        $request->validate([
+            'product_ids' => ['required', 'array', 'min:1'],
+            'product_ids.*' => ['integer', 'exists:products,id'],
+        ]);
+
+        $ids = $request->input('product_ids');
+
+        return DB::transaction(function () use ($ids, $request, $logger) {
+            $count = Product::whereIn('id', $ids)
+                ->where('batch_type', 'new_batch')
+                ->update([
+                    'batch_type' => 'standard',
+                    'transferred_at' => now(),
+                    'transferred_by' => $request->user()->id,
+                ]);
+
+            \App\Services\AnalyticsCacheService::invalidate();
+
+            $logger->log('products.bulk_transferred', null, [
+                'count' => $count,
+                'product_ids' => $ids,
+            ], $request);
+
+            return response()->json([
+                'message' => "Перенесено товаров в основной завоз: {$count}.",
+                'count' => $count,
+            ]);
+        });
+    }
+
+    /**
+     * Ручное переключение статуса между основным и новым завозом.
+     */
+    public function toggleBatchType(Request $request, Product $product, ActivityLogger $logger)
+    {
+        $newType = $request->input('batch_type');
+        if (! in_array($newType, ['standard', 'new_batch'], true)) {
+            $newType = $product->batch_type === 'new_batch' ? 'standard' : 'new_batch';
+        }
+
+        $product->update([
+            'batch_type' => $newType,
+            'transferred_at' => $newType === 'standard' ? now() : null,
+            'transferred_by' => $newType === 'standard' ? $request->user()->id : null,
+        ]);
+
+        \App\Services\AnalyticsCacheService::invalidate();
+
+        $logger->log('products.batch_type_toggled', $product, [
+            'batch_type' => $newType,
+        ], $request);
+
+        return response()->json([
+            'message' => $newType === 'new_batch' ? 'Товар помечен как новый завоз.' : 'Товар перенесён в основной завоз.',
+            'product' => $product->load(['category', 'variants']),
         ]);
     }
 
@@ -345,6 +634,9 @@ class ProductController extends Controller
             'base_sale_price' => ['nullable', 'numeric', 'min:0'],
             'status' => ['sometimes', Rule::in(['active', 'low_stock', 'out_of_stock'])],
             'photo' => ['nullable', 'image', 'max:4096'],
+            'batch_type' => ['nullable', 'string', Rule::in(['standard', 'new_batch'])],
+            'batch_note' => ['nullable', 'string', 'max:255'],
+            'batch_period' => ['nullable', 'string', 'max:100'],
             'variants' => ['required', 'array', 'min:1'],
             'variants.*.id' => ['nullable', 'integer', 'exists:product_variants,id'],
             'variants.*.size' => [$isHat ? 'nullable' : 'required', 'string', 'max:64'],
@@ -364,7 +656,7 @@ class ProductController extends Controller
         }
         unset($data['base_sale_price']);
 
-        foreach (['name', 'type', 'color', 'description'] as $field) {
+        foreach (['name', 'type', 'color', 'description', 'batch_note', 'batch_period'] as $field) {
             if (isset($data[$field])) {
                 $data[$field] = strip_tags((string) $data[$field]);
             }

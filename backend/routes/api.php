@@ -21,6 +21,8 @@ Route::middleware('jwt')->group(function () {
     Route::get('auth/me', [AuthController::class, 'me']);
     Route::post('auth/logout', [AuthController::class, 'logout']);
 
+    Route::get('products/batch-counters', [ProductController::class, 'batchCounters']);
+    Route::get('products/{product}/merge-candidates', [ProductController::class, 'mergeCandidates']);
     Route::get('products', [ProductController::class, 'index']);
     Route::get('product-items/lookup/{code}', [ProductController::class, 'lookupItem']);
     Route::get('products/{product}', [ProductController::class, 'show']);
@@ -37,6 +39,9 @@ Route::middleware('jwt')->group(function () {
         Route::get('dashboard', DashboardController::class);
 
         Route::apiResource('categories', CategoryController::class)->except(['index', 'show']);
+        Route::post('products/bulk-transfer', [ProductController::class, 'bulkTransfer']);
+        Route::post('products/{product}/transfer-to-standard', [ProductController::class, 'transferToStandard']);
+        Route::post('products/{product}/toggle-batch-type', [ProductController::class, 'toggleBatchType']);
         Route::apiResource('products', ProductController::class)->except(['index', 'show']);
         Route::post('products/import', [ProductController::class, 'import']);
 

@@ -542,7 +542,15 @@
                 </div>
               </div>
               <div class="min-w-0 flex-1">
-                <div class="truncate text-sm font-medium">{{ product.name }}</div>
+                <div class="flex items-center gap-1.5">
+                  <span class="truncate text-sm font-medium">{{ product.name }}</span>
+                  <span
+                    v-if="product.batch_type === 'new_batch'"
+                    class="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950/80 dark:text-amber-300"
+                  >
+                    📦 Новый завоз
+                  </span>
+                </div>
                 <div class="mt-0.5 text-xs text-slate-500">{{ productLineMeta(product) }}</div>
                 <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
                   <span class="rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
@@ -2951,7 +2959,7 @@ async function submitQuickSale() {
 }
 
 async function fetchProducts() {
-  await catalog.fetchProducts({ search: productSearch.value || undefined, per_page: 40 })
+  await catalog.fetchProducts({ search: productSearch.value || undefined, per_page: 40, batch_type: 'all' })
 }
 
 function debouncedProducts() {

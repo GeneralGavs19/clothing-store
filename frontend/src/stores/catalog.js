@@ -28,6 +28,7 @@ export const useCatalogStore = defineStore('catalog', {
   state: () => ({
     products: [],
     productMeta: { current_page: 1, last_page: 1, total: 0, per_page: 12 },
+    batchCounters: { standard: 0, new_batch: 0 },
     categories: [],
     categoryMeta: { current_page: 1, last_page: 1, total: 0, per_page: 100 },
     loadingProducts: false,
@@ -55,6 +56,9 @@ export const useCatalogStore = defineStore('catalog', {
         })
         this.products = data.data
         this.productMeta = data.meta
+        if (data.meta?.batch_counters) {
+          this.batchCounters = data.meta.batch_counters
+        }
       } catch (error) {
         if (error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED') {
           return
@@ -121,6 +125,34 @@ export const useCatalogStore = defineStore('catalog', {
     },
     async adjustStock(payload) {
       return api.post('/stock/adjust', payload)
+    },
+    async fetchBatchCounters() {
+      try {
+        const { data } = await api.get('/products/batch-counters')
+        this.batchCounters = data
+        return data
+      } catch (err) {
+        console.error('Failed to fetch batch counters', err)
+      }
+    },
+    async fetchMergeCandidates(productId) {
+      const { data } = await api.get(`/products/${productId}/merge-candidates`)
+      return data
+    },
+    async transferToStandard(productId, payload) {
+      const { data } = await api.post(`/products/${productId}/transfer-to-standard`, payload)
+      await this.fetchBatchCounters()
+      return data
+    },
+    async bulkTransfer(productIds) {
+      const { data } = await api.post('/products/bulk-transfer', { product_ids: productIds })
+      await this.fetchBatchCounters()
+      return data
+    },
+    async toggleBatchType(productId, batchType = null) {
+      const { data } = await api.post(`/products/${productId}/toggle-batch-type`, { batch_type: batchType })
+      await this.fetchBatchCounters()
+      return data
     },
   },
 })

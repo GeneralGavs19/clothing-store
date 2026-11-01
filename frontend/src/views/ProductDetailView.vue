@@ -23,6 +23,19 @@
                 {{ product.type }}
               </span>
               <span class="badge" :class="statusClass(product.status)">{{ statusLabel(product.status) }}</span>
+              <span
+                v-if="product.batch_type === 'new_batch'"
+                class="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-800 dark:bg-amber-950 dark:text-amber-300 flex items-center gap-1"
+              >
+                <Sparkles class="h-3.5 w-3.5" />
+                <span>Новый завоз (Временный)</span>
+              </span>
+              <span
+                v-else-if="product.transferred_at"
+                class="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+              >
+                ✓ Перенесён в основной завоз
+              </span>
             </div>
             <p class="mt-1 text-sm text-slate-500">
               {{ product.category?.name || 'Без категории' }}
@@ -131,6 +144,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
+import { Sparkles } from 'lucide-vue-next'
 import { resolveApiOrigin } from '../config/api'
 import { useAuthStore } from '../stores/auth'
 import { useCatalogStore } from '../stores/catalog'

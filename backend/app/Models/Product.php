@@ -27,6 +27,12 @@ class Product extends Model
         'low_stock_threshold',
         'status',
         'created_by',
+        'batch_type',
+        'batch_note',
+        'batch_period',
+        'transferred_at',
+        'transferred_by',
+        'merged_into_id',
     ];
 
     protected $casts = [
@@ -36,9 +42,12 @@ class Product extends Model
         'stock_quantity' => 'integer',
         'display_quantity' => 'integer',
         'low_stock_threshold' => 'integer',
+        'transferred_at' => 'datetime',
+        'transferred_by' => 'integer',
+        'merged_into_id' => 'integer',
     ];
 
-    protected $appends = ['total_quantity', 'total_sold', 'initial_quantity', 'photo_url', 'size'];
+    protected $appends = ['total_quantity', 'total_sold', 'new_batch_sold', 'initial_quantity', 'photo_url', 'size'];
 
     public function category()
     {
@@ -74,6 +83,29 @@ class Product extends Model
             ->where('product_id', $this->id)
             ->whereHas('sale', fn ($q) => $q->where('status', 'approved'))
             ->sum('quantity');
+    }
+
+    public function getNewBatchSoldAttribute(): int
+    {
+        if (array_key_exists('new_batch_sold', $this->attributes)) {
+            return (int) $this->attributes['new_batch_sold'];
+        }
+
+        return (int) SaleItem::query()
+            ->where('product_id', $this->id)
+            ->whereHas('sale', function ($q) {
+                $q->where('status', 'approved')
+                  ->where(function ($sq) {
+                      $sq->where('cashier_note', 'like', '%завоз%')
+                         ->orWhere('cashier_note', 'like', '%Завоз%');
+                  });
+            })
+            ->sum('quantity');
+    }
+
+    public function mergedInto()
+    {
+        return $this->belongsTo(Product::class, 'merged_into_id');
     }
 
     public function getInitialQuantityAttribute(): int
