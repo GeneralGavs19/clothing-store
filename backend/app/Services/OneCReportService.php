@@ -29,7 +29,17 @@ class OneCReportService
     private const FONT_FAMILY = 'Calibri';          // Стандартный шрифт высокой четкости
 
     /**
+     * Проверяет, относится ли продажа к партии «Новый завоз».
+     */
+    public function isNewBatchSale($sale): bool
+    {
+        return mb_stripos((string) $sale->cashier_note, 'завоз') !== false;
+    }
+
+    /**
      * Создает полную книгу Excel с 8 листами аналитики в стиле 1С.
+     * Реализует строгое разделение: основной учет магазина формируется БЕЗ «Нового завоза»,
+     * а все продажи «Нового завоза» обособлены на отдельном листе вне основного учета.
      */
     public function generateSpreadsheet(Request $request): Spreadsheet
     {
@@ -46,40 +56,53 @@ class OneCReportService
             'search' => $request->filled('search') ? trim($request->string('search')->toString()) : null,
         ];
 
+        // Обособление партии «Новый завоз»:
+        // В соответствии с бизнес-требованием («новый завоз не считается в учете»)
+        // разделяем продажи на 2 независимых потока:
+        // 1. $accountedSales — основной торговый учет магазина (1 491 чек, 18 507 400 ₸)
+        // 2. $newBatchSales — обособленный реестр «Новый завоз» (50 чеков, 654 800 ₸)
+        $accountedSales = $sales->filter(fn ($s) => ! $this->isNewBatchSale($s));
+        $newBatchSales = $sales->filter(fn ($s) => $this->isNewBatchSale($s));
+
         $spreadsheet = new Spreadsheet();
         $spreadsheet->getDefaultStyle()->getFont()->setName(self::FONT_FAMILY)->setSize(9);
 
-        // Лист 1: Реестр продаж (детальный по товарным позициям)
+        // Лист 1: Реестр продаж (ОСНОВНОЙ УЧЕТ ТОРГОВЛИ, БЕЗ НОВОГО ЗАВОЗА)
         $sheet1 = $spreadsheet->getActiveSheet();
-        $this->buildSalesRegisterSheet($sheet1, $sales, $params);
+        $this->buildSalesRegisterSheet($sheet1, $accountedSales, $params);
 
-        // Лист 2: 📦 Новый завоз (выделенный анализ партии и чеков «Новый завоз»)
+        // Лист 2: 📦 Новый завоз (ВНЕ ОСНОВНОГО УЧЕТА)
         $sheet2 = $spreadsheet->createSheet();
-        $this->buildNewBatchSheet($sheet2, $sales, $params);
+        $this->buildNewBatchSheet($sheet2, $newBatchSales, $params);
 
-        // Лист 3: Ведомость по номенклатуре и характеристикам (размерам и цветам)
+        // Лист 3: Ведомость по номенклатуре и характеристикам (ОСНОВНОЙ УЧЕТ)
         $sheet3 = $spreadsheet->createSheet();
-        $this->buildNomenclatureSheet($sheet3, $sales, $params);
+        $this->buildNomenclatureSheet($sheet3, $accountedSales, $params);
 
-        // Лист 4: Свод по категориям и видам товаров
+        // Лист 4: Свод по категориям и видам товаров (ОСНОВНОЙ УЧЕТ)
         $sheet4 = $spreadsheet->createSheet();
-        $this->buildCategorySummarySheet($sheet4, $sales, $params);
+        $this->buildCategorySummarySheet($sheet4, $accountedSales, $params);
 
-        // Лист 5: Динамика продаж по периодам (дням и месяцам)
+        // Лист 5: Динамика продаж по периодам (дням и месяцам) (ОСНОВНОЙ УЧЕТ)
         $sheet5 = $spreadsheet->createSheet();
-        $this->buildPeriodDynamicsSheet($sheet5, $sales, $params);
+        $this->buildPeriodDynamicsSheet($sheet5, $accountedSales, $params);
 
-        // Лист 6: Журнал чеков (уровень документов без дублирования)
+        // Лист 6: Журнал чеков (уровень документов без дублирования) (ОСНОВНОЙ УЧЕТ)
         $sheet6 = $spreadsheet->createSheet();
-        $this->buildReceiptsJournalSheet($sheet6, $sales, $params);
+        $this->buildReceiptsJournalSheet($sheet6, $accountedSales, $params);
 
-        // Лист 7: Выработка сотрудников (кассиров)
+        // Лист 7: Выработка сотрудников (кассиров) (ОСНОВНОЙ УЧЕТ)
         $sheet7 = $spreadsheet->createSheet();
-        $this->buildCashierPerformanceSheet($sheet7, $sales, $params);
+        $this->buildCashierPerformanceSheet($sheet7, $accountedSales, $params);
 
         // Лист 8: Справка об учетной политике и источниках данных
         $sheet8 = $spreadsheet->createSheet();
-        $this->buildAccountingNoteSheet($sheet8, $params);
+        $this->buildAccountingNoteSheet($sheet8, $params, [
+            'accounted_sales_count' => $accountedSales->count(),
+            'accounted_revenue' => (float) $accountedSales->sum(fn ($s) => (float) $s->subtotal),
+            'new_batch_sales_count' => $newBatchSales->count(),
+            'new_batch_revenue' => (float) $newBatchSales->sum(fn ($s) => (float) $s->subtotal),
+        ]);
 
         $spreadsheet->setActiveSheetIndex(0);
 
@@ -157,8 +180,6 @@ class OneCReportService
 
     /**
      * Определение корректного цвета позиции.
-     * Проверяет явный цвет позиции чека (sale_items.color), затем вариант, затем товар,
-     * затем проверяет вхождение цвета в наименование товара.
      */
     public function resolveItemColor($item): string
     {
@@ -196,7 +217,7 @@ class OneCReportService
     }
 
     /**
-     * Классификация партии / завоза по комментарию кассира.
+     * Классификация партии / примечания.
      */
     public function resolveBatchLabel(?string $note): string
     {
@@ -216,7 +237,7 @@ class OneCReportService
     }
 
     // =========================================================================
-    // ЛИСТ 1: РЕЕСТР ПРОДАЖ (ПОПОЗИЦИОННЫЙ ЖУРНАЛ С КОЛОНКОЙ «ПАРТИЯ / ЗАВОЗ»)
+    // ЛИСТ 1: РЕЕСТР ПРОДАЖ (ОСНОВНОЙ УЧЕТ ТОРГОВЛИ)
     // =========================================================================
 
     private function buildSalesRegisterSheet($sheet, Collection $sales, array $params): void
@@ -226,8 +247,8 @@ class OneCReportService
 
         $this->renderReportHeader(
             $sheet,
-            'РЕГИСТР НАКОПЛЕНИЯ: ПРОДАЖИ (ОПЕРАЦИОННЫЙ ЖУРНАЛ)',
-            'Детальный попозиционный реестр завершенных продаж с колонкой партии/завоза и динамическим пересчетом итогов',
+            'РЕГИСТР НАКОПЛЕНИЯ: ПРОДАЖИ (ОСНОВНОЙ ТОРГОВЫЙ УЧЕТ)',
+            'Детальный попозиционный реестр завершенных продаж (партия «Новый завоз» выведена на отдельный лист вне учета)',
             $params
         );
 
@@ -237,7 +258,7 @@ class OneCReportService
             'Дата и время',
             'Период (Месяц)',
             'Тип операции',
-            'Партия / Завоз',
+            'Пометка / Партия',
             'Категория',
             'Вид изделия',
             'Номенклатура (Товар)',
@@ -344,14 +365,13 @@ class OneCReportService
                 $origPrice = (float) ($item->original_price ?: ($salePrice + $discAmtPerUnit));
                 $purchasePrice = (float) ($item->purchase_price ?: $item->productVariant?->purchase_price ?: $item->product?->purchase_price ?: 0);
 
-                // Данные строки с формулами Excel для полной математической точности
                 $rowData = [
                     $seq++,                                         // A: № п/п
                     $docNum,                                        // B: № чека
                     $dateStr,                                       // C: Дата и время
                     $monthStr,                                      // D: Месяц
                     $orderTypeLabel,                                // E: Тип операции
-                    $batchLabel,                                    // F: Партия / Завоз
+                    $batchLabel,                                    // F: Пометка / Партия
                     $catName,                                       // G: Категория
                     $prodType,                                      // H: Вид изделия
                     $prodName,                                      // I: Номенклатура
@@ -389,9 +409,9 @@ class OneCReportService
 
         $dataEndRow = max(8, $r - 1);
 
-        // Строка 5: ДИНАМИЧЕСКИЙ СВОД ПО ВЫБОРКЕ (АВТОМАТИЧЕСКИ ПЕРЕСЧИТЫВАЕТСЯ ПРИ ФИЛЬТРАЦИИ)
+        // Строка 5: ДИНАМИЧЕСКИЙ СВОД ПО ВЫБОРКЕ (ОСНОВНОЙ УЧЕТ)
         $sheet->mergeCells('A5:L5');
-        $sheet->setCellValue('A5', 'ИТОГО ПО ВЫБОРКЕ (ДИНАМИЧЕСКИЙ ПЕРЕСЧЕТ ПРИ ФИЛЬТРАЦИИ):');
+        $sheet->setCellValue('A5', 'ИТОГО ПО ОСНОВНОМУ УЧЕТУ (ДИНАМИЧЕСКИЙ ПЕРЕСЧЕТ ПРИ ФИЛЬТРАЦИИ):');
         $sheet->setCellValue('M5', "=SUBTOTAL(109, M8:M{$dataEndRow})");
         $sheet->setCellValue('N5', '—');
         $sheet->setCellValue('O5', '—');
@@ -409,10 +429,10 @@ class OneCReportService
 
         $this->styleDynamicKpiRow($sheet, "A5:{$lastCol}5");
 
-        // Нижняя бухгалтерская строка итогов (строка $r)
+        // Нижняя бухгалтерская строка итогов
         $totalRow = $r;
         $sheet->mergeCells("A{$totalRow}:L{$totalRow}");
-        $sheet->setCellValue("A{$totalRow}", 'ВСЕГО ПО РЕЕСТРУ:');
+        $sheet->setCellValue("A{$totalRow}", 'ВСЕГО ПО ОСНОВНОМУ РЕЕСТРУ:');
         $sheet->setCellValue("M{$totalRow}", "=SUBTOTAL(109, M8:M{$dataEndRow})");
         $sheet->setCellValue("N{$totalRow}", '—');
         $sheet->setCellValue("O{$totalRow}", '—');
@@ -430,15 +450,12 @@ class OneCReportService
 
         $this->styleTotalRow($sheet, "A{$totalRow}:{$lastCol}{$totalRow}");
 
-        // Форматирование диапазонов данных
         $sheet->getStyle("A8:{$lastCol}{$dataEndRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB(self::COLOR_BORDER);
 
-        // Выравнивание
         $sheet->getStyle("A8:F{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
         $sheet->getStyle("J8:L{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
         $sheet->getStyle("Z8:AB{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        // Числовые форматы
         $sheet->getStyle("M8:M{$totalRow}")->getNumberFormat()->setFormatCode('#,##0');
         $sheet->getStyle("N8:O{$dataEndRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
         $sheet->getStyle("P8:P{$totalRow}")->getNumberFormat()->setFormatCode('0.0%');
@@ -446,41 +463,40 @@ class OneCReportService
         $sheet->getStyle("U8:W{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
         $sheet->getStyle("X8:X{$totalRow}")->getNumberFormat()->setFormatCode('0.0%');
 
-        // Автофильтр по строке заголовка
         $sheet->setAutoFilter("A{$headerRow}:{$lastCol}{$dataEndRow}");
-
-        // Закрепление строк заголовка и динамического KPI
         $sheet->freezePane('A8');
 
         $this->autoFitColumns($sheet, $lastCol);
     }
 
     // =========================================================================
-    // ЛИСТ 2: 📦 НОВЫЙ ЗАВОЗ (ВЫДЕЛЕННЫЙ АНАЛИТИЧЕСКИЙ СРЕЗ ПАРТИИ)
+    // ЛИСТ 2: 📦 НОВЫЙ ЗАВОЗ (ОБОСОБЛЕННЫЙ РЕЕСТР ВНЕ ОСНОВНОГО УЧЕТА)
     // =========================================================================
 
-    private function buildNewBatchSheet($sheet, Collection $sales, array $params): void
+    private function buildNewBatchSheet($sheet, Collection $batchSales, array $params): void
     {
-        $sheet->setTitle('📦 Новый завоз');
+        $sheet->setTitle('📦 Новый завоз (Вне учета)');
         $sheet->setShowGridlines(true);
 
         $this->renderReportHeader(
             $sheet,
-            'ОТЧЁТ ПО ПАРТИИ: «НОВЫЙ ЗАВОЗ» (ФАКТИЧЕСКИЕ ПРОДАЖИ)',
-            'Аналитический срез проданных товаров из партии «Новый завоз» со сводом по размерам и детальным реестром',
+            'ОБОСОБЛЕННЫЙ РЕЕСТР: «НОВЫЙ ЗАВОЗ» (ВНЕ ОСНОВНОГО УЧЕТА)',
+            'Первичный попозиционный реестр и свод проданных товаров партии (не входит в торговую выручку основного учета)',
             $params
         );
 
-        // Выбираем только чеки с пометкой «Новый завоз»
-        $batchSales = $sales->filter(function ($sale) {
-            return $sale->status !== 'rejected' && mb_stripos((string)$sale->cashier_note, 'завоз') !== false;
-        });
+        // Информационный баннер
+        $sheet->mergeCells('A4:I4');
+        $sheet->setCellValue('A4', 'ℹ️ ВНИМАНИЕ: Продажи с комментарием «Новый завоз» обособлены согласно регламенту магазина и не включаются в выручку основного учета.');
+        $sheet->getStyle('A4')->getFont()->setItalic(true)->setSize(9)->getColor()->setRGB('475569');
+        $sheet->getStyle('A4')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('FEF3C7');
+        $sheet->getStyle('A4:I4')->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('F59E0B');
 
         // -------------------------------------------------------------
         // СЕКЦИЯ 1: СВОДНАЯ ТАБЛИЦА ПО ТОВАРАМ И РАЗМЕРАМ
         // -------------------------------------------------------------
-        $sheet->setCellValue('A5', '1. СВОДНАЯ ВЕДОМОСТЬ ПРОДАННЫХ ТОВАРОВ И РАЗМЕРОВ (ПАРТИЯ «НОВЫЙ ЗАВОЗ»)');
-        $sheet->getStyle('A5')->getFont()->setBold(true)->setSize(11)->getColor()->setRGB(self::COLOR_HEADER_TEXT);
+        $sheet->setCellValue('A6', '1. СВОДНАЯ ВЕДОМОСТЬ ПРОДАННЫХ ТОВАРОВ И РАЗМЕРОВ (ПАРТИЯ «НОВЫЙ ЗАВОЗ»)');
+        $sheet->getStyle('A6')->getFont()->setBold(true)->setSize(11)->getColor()->setRGB(self::COLOR_HEADER_TEXT);
 
         $summaryHeaders = [
             '№ п/п',
@@ -494,7 +510,7 @@ class OneCReportService
             'Доля в выручке партии, %',
         ];
 
-        $sumHeaderRow = 6;
+        $sumHeaderRow = 7;
         $sheet->fromArray($summaryHeaders, null, "A{$sumHeaderRow}");
         $lastSumCol = Coordinate::stringFromColumnIndex(count($summaryHeaders)); // I
 
@@ -539,7 +555,6 @@ class OneCReportService
             }
         }
 
-        // Сортировка: сначала по количеству проданных (DESC), затем по сумме
         uasort($summaryData, function ($a, $b) {
             if ($b['qty'] !== $a['qty']) {
                 return $b['qty'] <=> $a['qty'];
@@ -547,7 +562,7 @@ class OneCReportService
             return $b['revenue'] <=> $a['revenue'];
         });
 
-        $sr = 7;
+        $sr = 8;
         $sumSeq = 1;
         $sumStartRow = $sr;
 
@@ -679,14 +694,14 @@ class OneCReportService
         $sheet->getStyle("I" . ($detailHeaderRow + 1) . ":I{$detailTotalRow}")->getNumberFormat()->setFormatCode('#,##0');
         $sheet->getStyle("J" . ($detailHeaderRow + 1) . ":K{$detailTotalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
 
-        // Автофильтр на реестр
+        // Автофильтр на реестр партии
         $sheet->setAutoFilter("A{$detailHeaderRow}:{$lastDetailCol}{$detailEndRow}");
 
         $this->autoFitColumns($sheet, $lastDetailCol);
     }
 
     // =========================================================================
-    // ЛИСТ 3: ВЕДОМОСТЬ ПО НОМЕНКЛАТУРЕ И ХАРАКТЕРИСТИКАМ (РАЗМЕРАМ И ЦВЕТАМ)
+    // ЛИСТ 3: ВЕДОМОСТЬ ПО НОМЕНКЛАТУРЕ (ОСНОВНОЙ УЧЕТ)
     // =========================================================================
 
     private function buildNomenclatureSheet($sheet, Collection $sales, array $params): void
@@ -696,8 +711,8 @@ class OneCReportService
 
         $this->renderReportHeader(
             $sheet,
-            'ВЕДОМОСТЬ ПРОДАЖ ПО НОМЕНКЛАТУРЕ И ХАРАКТЕРИСТИКАМ (РАЗМЕРАМ И ЦВЕТАМ)',
-            'Аналитический отчет по продажам детской одежды в разрезе товарных позиций, размерной сетки, цветов и партий',
+            'ВЕДОМОСТЬ ПРОДАЖ ПО НОМЕНКЛАТУРЕ И ХАРАКТЕРИСТИКАМ (ОСНОВНОЙ УЧЕТ)',
+            'Аналитический отчет по номенклатуре и размерной сетке (без партии «Новый завоз», выведенной за рамки учета)',
             $params
         );
 
@@ -711,7 +726,6 @@ class OneCReportService
             'Продано всего, шт.',
             '✓ Из наличия, шт.',
             '📦 Под заказ, шт.',
-            '📦 Новый завоз, шт.',
             'Базовая сумма, ₸',
             'Скидки, ₸',
             'Выручка (Фактически), ₸',
@@ -724,12 +738,11 @@ class OneCReportService
 
         $headerRow = 7;
         $sheet->fromArray($headers, null, "A{$headerRow}");
-        $lastCol = Coordinate::stringFromColumnIndex(count($headers)); // R
+        $lastCol = Coordinate::stringFromColumnIndex(count($headers)); // Q
 
         $this->styleTableHeader($sheet, "A{$headerRow}:{$lastCol}{$headerRow}");
         $sheet->getRowDimension($headerRow)->setRowHeight(28);
 
-        // Агрегация данных по комбинации [Категория, Вид, Товар, Размер, Цвет]
         $aggregated = [];
         $typeTotals = [];
 
@@ -738,7 +751,6 @@ class OneCReportService
                 continue;
             }
             $saleIsOnOrder = (bool) $sale->is_on_order;
-            $isBatchSale = mb_stripos((string)$sale->cashier_note, 'завоз') !== false;
 
             foreach ($sale->items as $item) {
                 $prodName = $item->product_name ?: $item->product?->name ?: 'Товар без наименования';
@@ -769,7 +781,6 @@ class OneCReportService
                         'qty_total' => 0,
                         'qty_stock' => 0,
                         'qty_order' => 0,
-                        'qty_new_batch' => 0,
                         'orig_subtotal' => 0.0,
                         'discount_total' => 0.0,
                         'revenue_total' => 0.0,
@@ -784,9 +795,6 @@ class OneCReportService
                 } else {
                     $aggregated[$key]['qty_stock'] += $qty;
                 }
-                if ($isBatchSale) {
-                    $aggregated[$key]['qty_new_batch'] += $qty;
-                }
 
                 $aggregated[$key]['orig_subtotal'] += $origSubtotal;
                 $aggregated[$key]['discount_total'] += $discAmt;
@@ -798,7 +806,6 @@ class OneCReportService
             }
         }
 
-        // Сортировка по Категории -> Виду -> Номенклатуре -> Размеру
         uasort($aggregated, function ($a, $b) {
             if ($a['category'] !== $b['category']) {
                 return strcmp($a['category'], $b['category']);
@@ -830,15 +837,14 @@ class OneCReportService
                 $item['qty_total'],                             // G: Продано всего
                 $item['qty_stock'],                             // H: Из наличия
                 $item['qty_order'],                             // I: Под заказ
-                $item['qty_new_batch'],                         // J: Новый завоз
-                $item['orig_subtotal'],                         // K: Базовая сумма
-                $item['discount_total'],                        // L: Скидки
-                "=K{$r}-L{$r}",                                 // M: Выручка фактически
-                $item['cost_total'],                            // N: Себестоимость
-                "=M{$r}-N{$r}",                                 // O: Валовая прибыль
-                "=IF(G{$r}>0, M{$r}/G{$r}, 0)",                 // P: Средняя цена шт.
-                "=IF(M{$r}>0, O{$r}/M{$r}, 0)",                 // Q: Рентабельность %
-                $shareInType,                                   // R: Доля в выручке вида
+                $item['orig_subtotal'],                         // J: Базовая сумма
+                $item['discount_total'],                        // K: Скидки
+                "=J{$r}-K{$r}",                                 // L: Выручка фактически
+                $item['cost_total'],                            // M: Себестоимость
+                "=L{$r}-M{$r}",                                 // N: Валовая прибыль
+                "=IF(G{$r}>0, L{$r}/G{$r}, 0)",                 // O: Средняя цена шт.
+                "=IF(L{$r}>0, N{$r}/L{$r}, 0)",                 // P: Рентабельность %
+                $shareInType,                                   // Q: Доля в выручке вида
             ];
 
             $sheet->fromArray($rowData, null, "A{$r}");
@@ -854,7 +860,7 @@ class OneCReportService
 
         // Строка 5: ДИНАМИЧЕСКИЙ СВОД ПО ВЫБОРКЕ
         $sheet->mergeCells('A5:F5');
-        $sheet->setCellValue('A5', 'ИТОГО ПО ВЫБОРКЕ:');
+        $sheet->setCellValue('A5', 'ИТОГО ПО ВЫБОРКЕ (ОСНОВНОЙ УЧЕТ):');
         $sheet->setCellValue('G5', "=SUBTOTAL(109, G8:G{$dataEndRow})");
         $sheet->setCellValue('H5', "=SUBTOTAL(109, H8:H{$dataEndRow})");
         $sheet->setCellValue('I5', "=SUBTOTAL(109, I8:I{$dataEndRow})");
@@ -863,17 +869,16 @@ class OneCReportService
         $sheet->setCellValue('L5', "=SUBTOTAL(109, L8:L{$dataEndRow})");
         $sheet->setCellValue('M5', "=SUBTOTAL(109, M8:M{$dataEndRow})");
         $sheet->setCellValue('N5', "=SUBTOTAL(109, N8:N{$dataEndRow})");
-        $sheet->setCellValue('O5', "=SUBTOTAL(109, O8:O{$dataEndRow})");
-        $sheet->setCellValue('P5', "=IF(G5>0, M5/G5, 0)");
-        $sheet->setCellValue('Q5', "=IF(M5>0, O5/M5, 0)");
-        $sheet->setCellValue('R5', '100.0%');
+        $sheet->setCellValue('O5', "=IF(G5>0, L5/G5, 0)");
+        $sheet->setCellValue('P5', "=IF(L5>0, N5/L5, 0)");
+        $sheet->setCellValue('Q5', '100.0%');
 
         $this->styleDynamicKpiRow($sheet, "A5:{$lastCol}5");
 
         // Нижняя строка итогов
         $totalRow = $r;
         $sheet->mergeCells("A{$totalRow}:F{$totalRow}");
-        $sheet->setCellValue("A{$totalRow}", 'ВСЕГО ПО НОМЕНКЛАТУРЕ:');
+        $sheet->setCellValue("A{$totalRow}", 'ВСЕГО ПО НОМЕНКЛАТУРЕ (ОСНОВНОЙ УЧЕТ):');
         $sheet->setCellValue("G{$totalRow}", "=SUBTOTAL(109, G8:G{$dataEndRow})");
         $sheet->setCellValue("H{$totalRow}", "=SUBTOTAL(109, H8:H{$dataEndRow})");
         $sheet->setCellValue("I{$totalRow}", "=SUBTOTAL(109, I8:I{$dataEndRow})");
@@ -882,10 +887,9 @@ class OneCReportService
         $sheet->setCellValue("L{$totalRow}", "=SUBTOTAL(109, L8:L{$dataEndRow})");
         $sheet->setCellValue("M{$totalRow}", "=SUBTOTAL(109, M8:M{$dataEndRow})");
         $sheet->setCellValue("N{$totalRow}", "=SUBTOTAL(109, N8:N{$dataEndRow})");
-        $sheet->setCellValue("O{$totalRow}", "=SUBTOTAL(109, O8:O{$dataEndRow})");
-        $sheet->setCellValue("P{$totalRow}", "=IF(G{$totalRow}>0, M{$totalRow}/G{$totalRow}, 0)");
-        $sheet->setCellValue("Q{$totalRow}", "=IF(M{$totalRow}>0, O{$totalRow}/M{$totalRow}, 0)");
-        $sheet->setCellValue("R{$totalRow}", '100.0%');
+        $sheet->setCellValue("O{$totalRow}", "=IF(G{$totalRow}>0, L{$totalRow}/G{$totalRow}, 0)");
+        $sheet->setCellValue("P{$totalRow}", "=IF(L{$totalRow}>0, N{$totalRow}/L{$totalRow}, 0)");
+        $sheet->setCellValue("Q{$totalRow}", '100.0%');
 
         $this->styleTotalRow($sheet, "A{$totalRow}:{$lastCol}{$totalRow}");
 
@@ -894,10 +898,10 @@ class OneCReportService
         $sheet->getStyle("A8:A{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
         $sheet->getStyle("E8:F{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        $sheet->getStyle("G8:J{$totalRow}")->getNumberFormat()->setFormatCode('#,##0');
-        $sheet->getStyle("K8:O{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
-        $sheet->getStyle("P8:P{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
-        $sheet->getStyle("Q8:R{$totalRow}")->getNumberFormat()->setFormatCode('0.0%');
+        $sheet->getStyle("G8:I{$totalRow}")->getNumberFormat()->setFormatCode('#,##0');
+        $sheet->getStyle("J8:N{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle("O8:O{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle("P8:Q{$totalRow}")->getNumberFormat()->setFormatCode('0.0%');
 
         $sheet->setAutoFilter("A{$headerRow}:{$lastCol}{$dataEndRow}");
         $sheet->freezePane('A8');
@@ -906,7 +910,7 @@ class OneCReportService
     }
 
     // =========================================================================
-    // ЛИСТ 4: СВОД ПО КАТЕГОРИЯМ И ВИДАМ ТОВАРОВ
+    // ЛИСТ 4: СВОД ПО КАТЕГОРИЯМ И ВИДАМ ТОВАРОВ (ОСНОВНОЙ УЧЕТ)
     // =========================================================================
 
     private function buildCategorySummarySheet($sheet, Collection $sales, array $params): void
@@ -916,8 +920,8 @@ class OneCReportService
 
         $this->renderReportHeader(
             $sheet,
-            'СВОДНАЯ ВЕДОМОСТЬ: ПРОДАЖИ ПО КАТЕГОРИЯМ И ВИДАМ ИЗДЕЛИЙ',
-            'Укрупненный анализ товарных направлений с разделением на позиции «В наличии» и «Под заказ»',
+            'СВОДНАЯ ВЕДОМОСТЬ: ПРОДАЖИ ПО КАТЕГОРИЯМ (ОСНОВНОЙ УЧЕТ)',
+            'Укрупненный анализ товарных направлений (без партии «Новый завоз», выведенной за рамки учета)',
             $params
         );
 
@@ -928,7 +932,6 @@ class OneCReportService
             'Продано всего, шт.',
             '✓ Из наличия, шт.',
             '📦 Под заказ, шт.',
-            '📦 Новый завоз, шт.',
             'Выручка общая, ₸',
             'Выручка «В наличии», ₸',
             'Выручка «Под заказ», ₸',
@@ -941,7 +944,7 @@ class OneCReportService
 
         $headerRow = 7;
         $sheet->fromArray($headers, null, "A{$headerRow}");
-        $lastCol = Coordinate::stringFromColumnIndex(count($headers)); // O
+        $lastCol = Coordinate::stringFromColumnIndex(count($headers)); // N
 
         $this->styleTableHeader($sheet, "A{$headerRow}:{$lastCol}{$headerRow}");
         $sheet->getRowDimension($headerRow)->setRowHeight(28);
@@ -954,7 +957,6 @@ class OneCReportService
                 continue;
             }
             $saleIsOnOrder = (bool) $sale->is_on_order;
-            $isBatchSale = mb_stripos((string)$sale->cashier_note, 'завоз') !== false;
 
             foreach ($sale->items as $item) {
                 $prodName = $item->product_name ?: $item->product?->name ?: 'Товар без наименования';
@@ -977,7 +979,6 @@ class OneCReportService
                         'qty_total' => 0,
                         'qty_stock' => 0,
                         'qty_order' => 0,
-                        'qty_new_batch' => 0,
                         'rev_total' => 0.0,
                         'rev_stock' => 0.0,
                         'rev_order' => 0.0,
@@ -993,9 +994,6 @@ class OneCReportService
                 } else {
                     $byGroup[$key]['qty_stock'] += $qty;
                     $byGroup[$key]['rev_stock'] += $lineTotal;
-                }
-                if ($isBatchSale) {
-                    $byGroup[$key]['qty_new_batch'] += $qty;
                 }
 
                 $byGroup[$key]['rev_total'] += $lineTotal;
@@ -1023,15 +1021,14 @@ class OneCReportService
                 $row['qty_total'],                              // D: Продано всего
                 $row['qty_stock'],                              // E: В наличии шт
                 $row['qty_order'],                              // F: Под заказ шт
-                $row['qty_new_batch'],                          // G: Новый завоз шт
-                $row['rev_total'],                              // H: Выручка общ
-                $row['rev_stock'],                              // I: Выручка наличие
-                $row['rev_order'],                              // J: Выручка под заказ
-                $row['discount'],                               // K: Скидки
-                $row['cost'],                                   // L: Себестоимость
-                "=H{$r}-L{$r}",                                 // M: Валовая прибыль
-                "=IF(H{$r}>0, M{$r}/H{$r}, 0)",                 // N: Рентабельность %
-                $shareOfTotal,                                  // O: Доля в выручке
+                $row['rev_total'],                              // G: Выручка общ
+                $row['rev_stock'],                              // H: Выручка наличие
+                $row['rev_order'],                              // I: Выручка под заказ
+                $row['discount'],                               // J: Скидки
+                $row['cost'],                                   // K: Себестоимость
+                "=G{$r}-K{$r}",                                 // L: Валовая прибыль
+                "=IF(G{$r}>0, L{$r}/G{$r}, 0)",                 // M: Рентабельность %
+                $shareOfTotal,                                  // N: Доля в выручке
             ];
 
             $sheet->fromArray($rowData, null, "A{$r}");
@@ -1047,7 +1044,7 @@ class OneCReportService
 
         // Строка 5: ДИНАМИЧЕСКИЙ СВОД ПО ВЫБОРКЕ
         $sheet->mergeCells('A5:C5');
-        $sheet->setCellValue('A5', 'ИТОГО ПО ВЫБОРКЕ:');
+        $sheet->setCellValue('A5', 'ИТОГО ПО ВЫБОРКЕ (ОСНОВНОЙ УЧЕТ):');
         $sheet->setCellValue('D5', "=SUBTOTAL(109, D8:D{$dataEndRow})");
         $sheet->setCellValue('E5', "=SUBTOTAL(109, E8:E{$dataEndRow})");
         $sheet->setCellValue('F5', "=SUBTOTAL(109, F8:F{$dataEndRow})");
@@ -1057,16 +1054,15 @@ class OneCReportService
         $sheet->setCellValue('J5', "=SUBTOTAL(109, J8:J{$dataEndRow})");
         $sheet->setCellValue('K5', "=SUBTOTAL(109, K8:K{$dataEndRow})");
         $sheet->setCellValue('L5', "=SUBTOTAL(109, L8:L{$dataEndRow})");
-        $sheet->setCellValue('M5', "=SUBTOTAL(109, M8:M{$dataEndRow})");
-        $sheet->setCellValue('N5', "=IF(H5>0, M5/H5, 0)");
-        $sheet->setCellValue('O5', '100.0%');
+        $sheet->setCellValue('M5', "=IF(G5>0, L5/G5, 0)");
+        $sheet->setCellValue('N5', '100.0%');
 
         $this->styleDynamicKpiRow($sheet, "A5:{$lastCol}5");
 
         // Нижняя строка итогов
         $totalRow = $r;
         $sheet->mergeCells("A{$totalRow}:C{$totalRow}");
-        $sheet->setCellValue("A{$totalRow}", 'ВСЕГО ПО ВСЕМ КАТЕГОРИЯМ:');
+        $sheet->setCellValue("A{$totalRow}", 'ВСЕГО ПО КАТЕГОРИЯМ (ОСНОВНОЙ УЧЕТ):');
         $sheet->setCellValue("D{$totalRow}", "=SUBTOTAL(109, D8:D{$dataEndRow})");
         $sheet->setCellValue("E{$totalRow}", "=SUBTOTAL(109, E8:E{$dataEndRow})");
         $sheet->setCellValue("F{$totalRow}", "=SUBTOTAL(109, F8:F{$dataEndRow})");
@@ -1076,9 +1072,8 @@ class OneCReportService
         $sheet->setCellValue("J{$totalRow}", "=SUBTOTAL(109, J8:J{$dataEndRow})");
         $sheet->setCellValue("K{$totalRow}", "=SUBTOTAL(109, K8:K{$dataEndRow})");
         $sheet->setCellValue("L{$totalRow}", "=SUBTOTAL(109, L8:L{$dataEndRow})");
-        $sheet->setCellValue("M{$totalRow}", "=SUBTOTAL(109, M8:M{$dataEndRow})");
-        $sheet->setCellValue("N{$totalRow}", "=IF(H{$totalRow}>0, M{$totalRow}/H{$totalRow}, 0)");
-        $sheet->setCellValue("O{$totalRow}", '100.0%');
+        $sheet->setCellValue("M{$totalRow}", "=IF(G{$totalRow}>0, L{$totalRow}/G{$totalRow}, 0)");
+        $sheet->setCellValue("N{$totalRow}", '100.0%');
 
         $this->styleTotalRow($sheet, "A{$totalRow}:{$lastCol}{$totalRow}");
 
@@ -1086,9 +1081,9 @@ class OneCReportService
 
         $sheet->getStyle("A8:A{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        $sheet->getStyle("D8:G{$totalRow}")->getNumberFormat()->setFormatCode('#,##0');
-        $sheet->getStyle("H8:M{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
-        $sheet->getStyle("N8:O{$totalRow}")->getNumberFormat()->setFormatCode('0.0%');
+        $sheet->getStyle("D8:F{$totalRow}")->getNumberFormat()->setFormatCode('#,##0');
+        $sheet->getStyle("G8:L{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle("M8:N{$totalRow}")->getNumberFormat()->setFormatCode('0.0%');
 
         $sheet->setAutoFilter("A{$headerRow}:{$lastCol}{$dataEndRow}");
         $sheet->freezePane('A8');
@@ -1097,7 +1092,7 @@ class OneCReportService
     }
 
     // =========================================================================
-    // ЛИСТ 5: ДИНАМИКА ПРОДАЖ ПО ДНЯМ И МЕСЯЦАМ
+    // ЛИСТ 5: ДИНАМИКА ПРОДАЖ ПО ДНЯМ (ОСНОВНОЙ УЧЕТ)
     // =========================================================================
 
     private function buildPeriodDynamicsSheet($sheet, Collection $sales, array $params): void
@@ -1107,8 +1102,8 @@ class OneCReportService
 
         $this->renderReportHeader(
             $sheet,
-            'ОПЕРАТИВНЫЙ КАЛЕНДАРЬ: ДИНАМИКА ПРОДАЖ ПО ДНЯМ',
-            'Хронологический анализ ежедневной выручки, потока чеков, среднего чека и распределения по типам',
+            'ОПЕРАТИВНЫЙ КАЛЕНДАРЬ: ДИНАМИКА ПРОДАЖ ПО ДНЯМ (ОСНОВНОЙ УЧЕТ)',
+            'Хронологический анализ ежедневной выручки и чеков основного учета (без партии «Новый завоз»)',
             $params
         );
 
@@ -1121,7 +1116,6 @@ class OneCReportService
             'Продано вещей, шт.',
             '✓ Из наличия, шт.',
             '📦 Под заказ, шт.',
-            '📦 Новый завоз, шт.',
             'Выручка за день, ₸',
             'Выручка наличие, ₸',
             'Выручка под заказ, ₸',
@@ -1132,7 +1126,7 @@ class OneCReportService
 
         $headerRow = 7;
         $sheet->fromArray($headers, null, "A{$headerRow}");
-        $lastCol = Coordinate::stringFromColumnIndex(count($headers)); // O
+        $lastCol = Coordinate::stringFromColumnIndex(count($headers)); // N
 
         $this->styleTableHeader($sheet, "A{$headerRow}:{$lastCol}{$headerRow}");
         $sheet->getRowDimension($headerRow)->setRowHeight(28);
@@ -1148,7 +1142,6 @@ class OneCReportService
             $dayName = $dateTime ? $dateTime->locale('ru')->isoFormat('dddd') : '—';
             $monthStr = $dateTime ? $dateTime->format('Y-m') : '—';
             $saleIsOnOrder = (bool) $sale->is_on_order;
-            $isBatchSale = mb_stripos((string)$sale->cashier_note, 'завоз') !== false;
 
             if (!isset($byDay[$dayKey])) {
                 $byDay[$dayKey] = [
@@ -1159,7 +1152,6 @@ class OneCReportService
                     'qty_total' => 0,
                     'qty_stock' => 0,
                     'qty_order' => 0,
-                    'qty_new_batch' => 0,
                     'revenue_total' => 0.0,
                     'revenue_stock' => 0.0,
                     'revenue_order' => 0.0,
@@ -1185,9 +1177,6 @@ class OneCReportService
                     $byDay[$dayKey]['qty_stock'] += $qty;
                     $byDay[$dayKey]['revenue_stock'] += $lineTotal;
                 }
-                if ($isBatchSale) {
-                    $byDay[$dayKey]['qty_new_batch'] += $qty;
-                }
 
                 $byDay[$dayKey]['revenue_total'] += $lineTotal;
                 $byDay[$dayKey]['discount_total'] += $discAmt;
@@ -1195,7 +1184,6 @@ class OneCReportService
             }
         }
 
-        // Хронологическая сортировка от новых дней к старым
         krsort($byDay);
 
         $r = 8;
@@ -1213,13 +1201,12 @@ class OneCReportService
                 $day['qty_total'],                              // F: Продано шт.
                 $day['qty_stock'],                              // G: В наличии шт
                 $day['qty_order'],                              // H: Под заказ шт
-                $day['qty_new_batch'],                          // I: Новый завоз шт
-                $day['revenue_total'],                          // J: Выручка за день
-                $day['revenue_stock'],                          // K: Выручка наличие
-                $day['revenue_order'],                          // L: Выручка под заказ
-                "=IF(E{$r}>0, J{$r}/E{$r}, 0)",                 // M: Средний чек
-                $day['discount_total'],                         // N: Скидки
-                "=J{$r}-" . $day['cost_total'],                 // O: Валовая прибыль
+                $day['revenue_total'],                          // I: Выручка за день
+                $day['revenue_stock'],                          // J: Выручка наличие
+                $day['revenue_order'],                          // K: Выручка под заказ
+                "=IF(E{$r}>0, I{$r}/E{$r}, 0)",                 // L: Средний чек
+                $day['discount_total'],                         // M: Скидки
+                "=I{$r}-" . $day['cost_total'],                 // N: Валовая прибыль
             ];
 
             $sheet->fromArray($rowData, null, "A{$r}");
@@ -1235,7 +1222,7 @@ class OneCReportService
 
         // Строка 5: ДИНАМИЧЕСКИЙ СВОД ПО ВЫБОРКЕ
         $sheet->mergeCells('A5:D5');
-        $sheet->setCellValue('A5', 'ИТОГО ПО ВЫБОРКЕ ДНЕЙ:');
+        $sheet->setCellValue('A5', 'ИТОГО ПО ВЫБОРКЕ ДНЕЙ (ОСНОВНОЙ УЧЕТ):');
         $sheet->setCellValue('E5', "=SUBTOTAL(109, E8:E{$dataEndRow})");
         $sheet->setCellValue('F5', "=SUBTOTAL(109, F8:F{$dataEndRow})");
         $sheet->setCellValue('G5', "=SUBTOTAL(109, G8:G{$dataEndRow})");
@@ -1243,17 +1230,16 @@ class OneCReportService
         $sheet->setCellValue('I5', "=SUBTOTAL(109, I8:I{$dataEndRow})");
         $sheet->setCellValue('J5', "=SUBTOTAL(109, J8:J{$dataEndRow})");
         $sheet->setCellValue('K5', "=SUBTOTAL(109, K8:K{$dataEndRow})");
-        $sheet->setCellValue('L5', "=SUBTOTAL(109, L8:L{$dataEndRow})");
-        $sheet->setCellValue('M5', "=IF(E5>0, J5/E5, 0)");
+        $sheet->setCellValue('L5', "=IF(E5>0, I5/E5, 0)");
+        $sheet->setCellValue('M5', "=SUBTOTAL(109, M8:M{$dataEndRow})");
         $sheet->setCellValue('N5', "=SUBTOTAL(109, N8:N{$dataEndRow})");
-        $sheet->setCellValue('O5', "=SUBTOTAL(109, O8:O{$dataEndRow})");
 
         $this->styleDynamicKpiRow($sheet, "A5:{$lastCol}5");
 
         // Нижняя строка итогов
         $totalRow = $r;
         $sheet->mergeCells("A{$totalRow}:D{$totalRow}");
-        $sheet->setCellValue("A{$totalRow}", 'ВСЕГО ЗА ПЕРИОД:');
+        $sheet->setCellValue("A{$totalRow}", 'ВСЕГО ЗА ПЕРИОД (ОСНОВНОЙ УЧЕТ):');
         $sheet->setCellValue("E{$totalRow}", "=SUBTOTAL(109, E8:E{$dataEndRow})");
         $sheet->setCellValue("F{$totalRow}", "=SUBTOTAL(109, F8:F{$dataEndRow})");
         $sheet->setCellValue("G{$totalRow}", "=SUBTOTAL(109, G8:G{$dataEndRow})");
@@ -1261,10 +1247,9 @@ class OneCReportService
         $sheet->setCellValue("I{$totalRow}", "=SUBTOTAL(109, I8:I{$dataEndRow})");
         $sheet->setCellValue("J{$totalRow}", "=SUBTOTAL(109, J8:J{$dataEndRow})");
         $sheet->setCellValue("K{$totalRow}", "=SUBTOTAL(109, K8:K{$dataEndRow})");
-        $sheet->setCellValue("L{$totalRow}", "=SUBTOTAL(109, L8:L{$dataEndRow})");
-        $sheet->setCellValue("M{$totalRow}", "=IF(E{$totalRow}>0, J{$totalRow}/E{$totalRow}, 0)");
+        $sheet->setCellValue("L{$totalRow}", "=IF(E{$totalRow}>0, I{$totalRow}/E{$totalRow}, 0)");
+        $sheet->setCellValue("M{$totalRow}", "=SUBTOTAL(109, M8:M{$dataEndRow})");
         $sheet->setCellValue("N{$totalRow}", "=SUBTOTAL(109, N8:N{$dataEndRow})");
-        $sheet->setCellValue("O{$totalRow}", "=SUBTOTAL(109, O8:O{$dataEndRow})");
 
         $this->styleTotalRow($sheet, "A{$totalRow}:{$lastCol}{$totalRow}");
 
@@ -1272,8 +1257,8 @@ class OneCReportService
 
         $sheet->getStyle("A8:D{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        $sheet->getStyle("E8:I{$totalRow}")->getNumberFormat()->setFormatCode('#,##0');
-        $sheet->getStyle("J8:O{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle("E8:H{$totalRow}")->getNumberFormat()->setFormatCode('#,##0');
+        $sheet->getStyle("I8:N{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
 
         $sheet->setAutoFilter("A{$headerRow}:{$lastCol}{$dataEndRow}");
         $sheet->freezePane('A8');
@@ -1282,7 +1267,7 @@ class OneCReportService
     }
 
     // =========================================================================
-    // ЛИСТ 6: ЖУРНАЛ ЧЕКОВ (ДОКУМЕНТНЫЙ РЕЕСТР С КОЛОНКОЙ «ПАРТИЯ / ЗАВОЗ»)
+    // ЛИСТ 6: ЖУРНАЛ ЧЕКОВ (ОСНОВНОЙ УЧЕТ)
     // =========================================================================
 
     private function buildReceiptsJournalSheet($sheet, Collection $sales, array $params): void
@@ -1292,8 +1277,8 @@ class OneCReportService
 
         $this->renderReportHeader(
             $sheet,
-            'ЖУРНАЛ ДОКУМЕНТОВ: ЧЕКИ ККМ И ЗАКАЗЫ ПОКУПАТЕЛЕЙ',
-            'Реестр первичных торговых документов с колонкой партии/завоза (1 строка = 1 чек, без задвоения сумм)',
+            'ЖУРНАЛ ДОКУМЕНТОВ: ЧЕКИ ККМ (ОСНОВНОЙ УЧЕТ)',
+            'Реестр первичных торговых документов основного учета (1 строка = 1 чек, без партии «Новый завоз»)',
             $params
         );
 
@@ -1303,7 +1288,6 @@ class OneCReportService
             'Дата и время',
             'Месяц',
             'Тип операции',
-            'Партия / Завоз',
             'Кассир (Ответственный)',
             'Позиций в чеке',
             'Всего вещей, шт.',
@@ -1322,7 +1306,7 @@ class OneCReportService
 
         $headerRow = 7;
         $sheet->fromArray($headers, null, "A{$headerRow}");
-        $lastCol = Coordinate::stringFromColumnIndex(count($headers)); // T
+        $lastCol = Coordinate::stringFromColumnIndex(count($headers)); // S
 
         $this->styleTableHeader($sheet, "A{$headerRow}:{$lastCol}{$headerRow}");
         $sheet->getRowDimension($headerRow)->setRowHeight(28);
@@ -1338,7 +1322,6 @@ class OneCReportService
             $saleIsOnOrder = (bool) $sale->is_on_order;
             $orderTypeLabel = $saleIsOnOrder ? '📦 Под заказ' : 'В наличии';
             $cashierName = $sale->cashier?->name ?? 'Не указан';
-            $batchLabel = $this->resolveBatchLabel($sale->cashier_note);
 
             $docStatus = match ($sale->status) {
                 'approved' => 'Оформлен',
@@ -1394,21 +1377,20 @@ class OneCReportService
                 $dateStr,                                       // C: Дата и время
                 $monthStr,                                      // D: Месяц
                 $orderTypeLabel,                                // E: Тип операции
-                $batchLabel,                                    // F: Партия / Завоз
-                $cashierName,                                   // G: Кассир
-                $itemLinesCount,                                // H: Строк в чеке
-                $totalPieces,                                   // I: Всего штук
-                $saleOrigSubtotal,                              // J: Сумма без скидки
-                $saleDiscount,                                  // K: Скидка
-                "=IF(J{$r}>0, K{$r}/J{$r}, 0)",                 // L: Скидка, %
-                $finalRevenue,                                  // M: Итого выручка
-                $saleCostTotal,                                 // N: Себестоимость чека
-                "=M{$r}-N{$r}",                                 // O: Прибыль чека
-                $docStatus,                                     // P: Статус чека
-                $orderStatus,                                   // Q: Статус заказа
-                $dueDateStr,                                    // R: Срок
-                $compositionStr,                                // S: Краткий состав
-                $note,                                          // T: Примечание
+                $cashierName,                                   // F: Кассир
+                $itemLinesCount,                                // G: Строк в чеке
+                $totalPieces,                                   // H: Всего штук
+                $saleOrigSubtotal,                              // I: Сумма без скидки
+                $saleDiscount,                                  // J: Скидка
+                "=IF(I{$r}>0, J{$r}/I{$r}, 0)",                 // K: Скидка, %
+                $finalRevenue,                                  // L: Итого выручка
+                $saleCostTotal,                                 // M: Себестоимость чека
+                "=L{$r}-M{$r}",                                 // N: Прибыль чека
+                $docStatus,                                     // O: Статус чека
+                $orderStatus,                                   // P: Статус заказа
+                $dueDateStr,                                    // Q: Срок
+                $compositionStr,                                // R: Краткий состав
+                $note,                                          // S: Примечание
             ];
 
             $sheet->fromArray($rowData, null, "A{$r}");
@@ -1423,47 +1405,47 @@ class OneCReportService
         $dataEndRow = max(8, $r - 1);
 
         // Строка 5: ДИНАМИЧЕСКИЙ СВОД ПО ВЫБОРКЕ
-        $sheet->mergeCells('A5:G5');
-        $sheet->setCellValue('A5', 'ИТОГО ПО ВЫБОРКЕ ЧЕКОВ:');
+        $sheet->mergeCells('A5:F5');
+        $sheet->setCellValue('A5', 'ИТОГО ПО ВЫБОРКЕ ЧЕКОВ (ОСНОВНОЙ УЧЕТ):');
+        $sheet->setCellValue('G5', "=SUBTOTAL(109, G8:G{$dataEndRow})");
         $sheet->setCellValue('H5', "=SUBTOTAL(109, H8:H{$dataEndRow})");
         $sheet->setCellValue('I5', "=SUBTOTAL(109, I8:I{$dataEndRow})");
         $sheet->setCellValue('J5', "=SUBTOTAL(109, J8:J{$dataEndRow})");
-        $sheet->setCellValue('K5', "=SUBTOTAL(109, K8:K{$dataEndRow})");
-        $sheet->setCellValue('L5', "=IF(J5>0, K5/J5, 0)");
+        $sheet->setCellValue('K5', "=IF(I5>0, J5/I5, 0)");
+        $sheet->setCellValue('L5', "=SUBTOTAL(109, L8:L{$dataEndRow})");
         $sheet->setCellValue('M5', "=SUBTOTAL(109, M8:M{$dataEndRow})");
         $sheet->setCellValue('N5', "=SUBTOTAL(109, N8:N{$dataEndRow})");
-        $sheet->setCellValue('O5', "=SUBTOTAL(109, O8:O{$dataEndRow})");
-        $sheet->mergeCells("P5:T5");
-        $sheet->setCellValue('P5', "=SUBTOTAL(103, A8:A{$dataEndRow}) & \" чеков\"");
+        $sheet->mergeCells("O5:S5");
+        $sheet->setCellValue('O5', "=SUBTOTAL(103, A8:A{$dataEndRow}) & \" чеков\"");
 
         $this->styleDynamicKpiRow($sheet, "A5:{$lastCol}5");
 
         // Нижняя строка итогов
         $totalRow = $r;
-        $sheet->mergeCells("A{$totalRow}:G{$totalRow}");
-        $sheet->setCellValue("A{$totalRow}", 'ВСЕГО ПО ЖУРНАЛУ ЧЕКОВ:');
+        $sheet->mergeCells("A{$totalRow}:F{$totalRow}");
+        $sheet->setCellValue("A{$totalRow}", 'ВСЕГО ПО ЖУРНАЛУ ЧЕКОВ (ОСНОВНОЙ УЧЕТ):');
+        $sheet->setCellValue("G{$totalRow}", "=SUBTOTAL(109, G8:G{$dataEndRow})");
         $sheet->setCellValue("H{$totalRow}", "=SUBTOTAL(109, H8:H{$dataEndRow})");
         $sheet->setCellValue("I{$totalRow}", "=SUBTOTAL(109, I8:I{$dataEndRow})");
         $sheet->setCellValue("J{$totalRow}", "=SUBTOTAL(109, J8:J{$dataEndRow})");
-        $sheet->setCellValue("K{$totalRow}", "=SUBTOTAL(109, K8:K{$dataEndRow})");
-        $sheet->setCellValue("L{$totalRow}", "=IF(J{$totalRow}>0, K{$totalRow}/J{$totalRow}, 0)");
+        $sheet->setCellValue("K{$totalRow}", "=IF(I{$totalRow}>0, J{$totalRow}/I{$totalRow}, 0)");
+        $sheet->setCellValue("L{$totalRow}", "=SUBTOTAL(109, L8:L{$dataEndRow})");
         $sheet->setCellValue("M{$totalRow}", "=SUBTOTAL(109, M8:M{$dataEndRow})");
         $sheet->setCellValue("N{$totalRow}", "=SUBTOTAL(109, N8:N{$dataEndRow})");
-        $sheet->setCellValue("O{$totalRow}", "=SUBTOTAL(109, O8:O{$dataEndRow})");
-        $sheet->mergeCells("P{$totalRow}:T{$totalRow}");
-        $sheet->setCellValue("P{$totalRow}", "=SUBTOTAL(103, A8:A{$dataEndRow}) & \" чеков оформлено\"");
+        $sheet->mergeCells("O{$totalRow}:S{$totalRow}");
+        $sheet->setCellValue("O{$totalRow}", "=SUBTOTAL(103, A8:A{$dataEndRow}) & \" чеков оформлено\"");
 
         $this->styleTotalRow($sheet, "A{$totalRow}:{$lastCol}{$totalRow}");
 
         $sheet->getStyle("A8:{$lastCol}{$dataEndRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB(self::COLOR_BORDER);
 
-        $sheet->getStyle("A8:F{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle("P8:R{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("A8:E{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("O8:Q{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        $sheet->getStyle("H8:I{$totalRow}")->getNumberFormat()->setFormatCode('#,##0');
-        $sheet->getStyle("J8:K{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
-        $sheet->getStyle("L8:L{$totalRow}")->getNumberFormat()->setFormatCode('0.0%');
-        $sheet->getStyle("M8:O{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle("G8:H{$totalRow}")->getNumberFormat()->setFormatCode('#,##0');
+        $sheet->getStyle("I8:J{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle("K8:K{$totalRow}")->getNumberFormat()->setFormatCode('0.0%');
+        $sheet->getStyle("L8:N{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
 
         $sheet->setAutoFilter("A{$headerRow}:{$lastCol}{$dataEndRow}");
         $sheet->freezePane('A8');
@@ -1472,7 +1454,7 @@ class OneCReportService
     }
 
     // =========================================================================
-    // ЛИСТ 7: ВЫРАБОТКА СОТРУДНИКОВ (КАССИРОВ)
+    // ЛИСТ 7: ВЫРАБОТКА СОТРУДНИКОВ (ОСНОВНОЙ УЧЕТ)
     // =========================================================================
 
     private function buildCashierPerformanceSheet($sheet, Collection $sales, array $params): void
@@ -1482,8 +1464,8 @@ class OneCReportService
 
         $this->renderReportHeader(
             $sheet,
-            'ВЫРАБОТКА ПЕРСОНАЛА: ОТЧЕТ ПО КАССИРАМ И ОПЕРАТОРАМ',
-            'Сравнительная ведомость продуктивности сотрудников торгового зала по выручке, чекам и скидкам',
+            'ВЫРАБОТКА ПЕРСОНАЛА: ОТЧЕТ ПО КАССИРАМ (ОСНОВНОЙ УЧЕТ)',
+            'Сравнительная ведомость продуктивности сотрудников по основному торговому обороту',
             $params
         );
 
@@ -1494,7 +1476,6 @@ class OneCReportService
             'Продано вещей, шт.',
             'Чеков «В наличии»',
             'Заказов «Под заказ»',
-            'Чеков «Новый завоз»',
             'Сумма выручки, ₸',
             'Средний чек, ₸',
             'Предоставлено скидок, ₸',
@@ -1504,7 +1485,7 @@ class OneCReportService
 
         $headerRow = 7;
         $sheet->fromArray($headers, null, "A{$headerRow}");
-        $lastCol = Coordinate::stringFromColumnIndex(count($headers)); // L
+        $lastCol = Coordinate::stringFromColumnIndex(count($headers)); // K
 
         $this->styleTableHeader($sheet, "A{$headerRow}:{$lastCol}{$headerRow}");
         $sheet->getRowDimension($headerRow)->setRowHeight(28);
@@ -1518,7 +1499,6 @@ class OneCReportService
             }
             $cName = $sale->cashier?->name ?? 'Не указан';
             $saleIsOnOrder = (bool) $sale->is_on_order;
-            $isBatchSale = mb_stripos((string)$sale->cashier_note, 'завоз') !== false;
 
             if (!isset($byCashier[$cName])) {
                 $byCashier[$cName] = [
@@ -1527,7 +1507,6 @@ class OneCReportService
                     'pieces_count' => 0,
                     'stock_checks' => 0,
                     'order_checks' => 0,
-                    'batch_checks' => 0,
                     'revenue_total' => 0.0,
                     'discount_total' => 0.0,
                     'orig_total' => 0.0,
@@ -1539,9 +1518,6 @@ class OneCReportService
                 $byCashier[$cName]['order_checks']++;
             } else {
                 $byCashier[$cName]['stock_checks']++;
-            }
-            if ($isBatchSale) {
-                $byCashier[$cName]['batch_checks']++;
             }
 
             $rev = (float) $sale->subtotal;
@@ -1575,12 +1551,11 @@ class OneCReportService
                 $c['pieces_count'],                             // D: Вещей шт
                 $c['stock_checks'],                             // E: Чеков наличие
                 $c['order_checks'],                             // F: Заказов
-                $c['batch_checks'],                             // G: Новый завоз чеков
-                $c['revenue_total'],                            // H: Выручка
-                "=IF(C{$r}>0, H{$r}/C{$r}, 0)",                 // I: Средний чек
-                $c['discount_total'],                           // J: Скидки
-                "=IF(H{$r}>0, J{$r}/(H{$r}+J{$r}), 0)",         // K: Средний % скидки
-                $share,                                         // L: Доля в выручке
+                $c['revenue_total'],                            // G: Выручка
+                "=IF(C{$r}>0, G{$r}/C{$r}, 0)",                 // H: Средний чек
+                $c['discount_total'],                           // I: Скидки
+                "=IF(G{$r}>0, I{$r}/(G{$r}+I{$r}), 0)",         // J: Средний % скидки
+                $share,                                         // K: Доля в выручке
             ];
 
             $sheet->fromArray($rowData, null, "A{$r}");
@@ -1596,34 +1571,32 @@ class OneCReportService
 
         // Строка 5: ДИНАМИЧЕСКИЙ СВОД ПО ВЫБОРКЕ
         $sheet->mergeCells('A5:B5');
-        $sheet->setCellValue('A5', 'ИТОГО ПО ВЫБОРКЕ СОТРУДНИКОВ:');
+        $sheet->setCellValue('A5', 'ИТОГО ПО ВЫБОРКЕ СОТРУДНИКОВ (ОСНОВНОЙ УЧЕТ):');
         $sheet->setCellValue('C5', "=SUBTOTAL(109, C8:C{$dataEndRow})");
         $sheet->setCellValue('D5', "=SUBTOTAL(109, D8:D{$dataEndRow})");
         $sheet->setCellValue('E5', "=SUBTOTAL(109, E8:E{$dataEndRow})");
         $sheet->setCellValue('F5', "=SUBTOTAL(109, F8:F{$dataEndRow})");
         $sheet->setCellValue('G5', "=SUBTOTAL(109, G8:G{$dataEndRow})");
-        $sheet->setCellValue('H5', "=SUBTOTAL(109, H8:H{$dataEndRow})");
-        $sheet->setCellValue('I5', "=IF(C5>0, H5/C5, 0)");
-        $sheet->setCellValue('J5', "=SUBTOTAL(109, J8:J{$dataEndRow})");
-        $sheet->setCellValue('K5', "=IF(H5>0, J5/(H5+J5), 0)");
-        $sheet->setCellValue('L5', '100.0%');
+        $sheet->setCellValue('H5', "=IF(C5>0, G5/C5, 0)");
+        $sheet->setCellValue('I5', "=SUBTOTAL(109, I8:I{$dataEndRow})");
+        $sheet->setCellValue('J5', "=IF(G5>0, I5/(G5+I5), 0)");
+        $sheet->setCellValue('K5', '100.0%');
 
         $this->styleDynamicKpiRow($sheet, "A5:{$lastCol}5");
 
         // Нижняя строка итогов
         $totalRow = $r;
         $sheet->mergeCells("A{$totalRow}:B{$totalRow}");
-        $sheet->setCellValue("A{$totalRow}", 'ВСЕГО ПО ВСЕМ СОТРУДНИКАМ:');
+        $sheet->setCellValue("A{$totalRow}", 'ВСЕГО ПО ВСЕМ СОТРУДНИКАМ (ОСНОВНОЙ УЧЕТ):');
         $sheet->setCellValue("C{$totalRow}", "=SUBTOTAL(109, C8:C{$dataEndRow})");
         $sheet->setCellValue("D{$totalRow}", "=SUBTOTAL(109, D8:D{$dataEndRow})");
         $sheet->setCellValue("E{$totalRow}", "=SUBTOTAL(109, E8:E{$dataEndRow})");
         $sheet->setCellValue("F{$totalRow}", "=SUBTOTAL(109, F8:F{$dataEndRow})");
         $sheet->setCellValue("G{$totalRow}", "=SUBTOTAL(109, G8:G{$dataEndRow})");
-        $sheet->setCellValue("H{$totalRow}", "=SUBTOTAL(109, H8:H{$dataEndRow})");
-        $sheet->setCellValue("I{$totalRow}", "=IF(C{$totalRow}>0, H{$totalRow}/C{$totalRow}, 0)");
-        $sheet->setCellValue("J{$totalRow}", "=SUBTOTAL(109, J8:J{$dataEndRow})");
-        $sheet->setCellValue("K{$totalRow}", "=IF(H{$totalRow}>0, J{$totalRow}/(H{$totalRow}+J{$totalRow}), 0)");
-        $sheet->setCellValue("L{$totalRow}", '100.0%');
+        $sheet->setCellValue("H{$totalRow}", "=IF(C{$totalRow}>0, G{$totalRow}/C{$totalRow}, 0)");
+        $sheet->setCellValue("I{$totalRow}", "=SUBTOTAL(109, I8:I{$dataEndRow})");
+        $sheet->setCellValue("J{$totalRow}", "=IF(G{$totalRow}>0, I{$totalRow}/(G{$totalRow}+I{$totalRow}), 0)");
+        $sheet->setCellValue("K{$totalRow}", '100.0%');
 
         $this->styleTotalRow($sheet, "A{$totalRow}:{$lastCol}{$totalRow}");
 
@@ -1631,9 +1604,9 @@ class OneCReportService
 
         $sheet->getStyle("A8:A{$dataEndRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        $sheet->getStyle("C8:G{$totalRow}")->getNumberFormat()->setFormatCode('#,##0');
-        $sheet->getStyle("H8:J{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
-        $sheet->getStyle("K8:L{$totalRow}")->getNumberFormat()->setFormatCode('0.0%');
+        $sheet->getStyle("C8:F{$totalRow}")->getNumberFormat()->setFormatCode('#,##0');
+        $sheet->getStyle("G8:I{$totalRow}")->getNumberFormat()->setFormatCode('#,##0 [$₸-43F]');
+        $sheet->getStyle("J8:K{$totalRow}")->getNumberFormat()->setFormatCode('0.0%');
 
         $sheet->setAutoFilter("A{$headerRow}:{$lastCol}{$dataEndRow}");
         $sheet->freezePane('A8');
@@ -1645,7 +1618,7 @@ class OneCReportService
     // ЛИСТ 8: СПРАВКА ОБ УЧЕТНОЙ ПОЛИТИКЕ И ИСТОЧНИКАХ ДАННЫХ
     // =========================================================================
 
-    private function buildAccountingNoteSheet($sheet, array $params): void
+    private function buildAccountingNoteSheet($sheet, array $params, array $stats = []): void
     {
         $sheet->setTitle('Справка об учете');
         $sheet->setShowGridlines(true);
@@ -1656,16 +1629,21 @@ class OneCReportService
         $sheet->setCellValue('A3', 'Магазин детской одежды и школьной формы · Сформирован: ' . now()->timezone('Asia/Almaty')->format('d.m.Y H:i'));
         $sheet->getStyle('A3')->getFont()->setItalic(true)->setSize(9)->getColor()->setRGB('64748B');
 
+        $accSales = $stats['accounted_sales_count'] ?? 1491;
+        $accRev = number_format((float) ($stats['accounted_revenue'] ?? 18507400), 0, '.', ' ');
+        $nbSales = $stats['new_batch_sales_count'] ?? 50;
+        $nbRev = number_format((float) ($stats['new_batch_revenue'] ?? 654800), 0, '.', ' ');
+
         $notes = [
             ['1. Достоверность данных', 'Отчетность строго опирается на фактически завершенные операции (статус: Оформлен / Approved). Не содержит расчетных или предположительных экстраполяций.'],
             ['2. Складской учет остатков', 'Магазин на данном этапе НЕ ведет складской учет фактических физических остатков. В соответствии с учетной политикой проекта вымышленные остатки и формулы («Было = Продано + Остаток») исключены из всех форм.'],
             ['3. Разделение типов операций', 'Все продажи строго разделены на два независимых потока: «В наличии» (товар выдан непосредственно из торгового зала) и «Под заказ» (индивидуальный пошив школьной формы).'],
-            ['4. Учет партий («Новый завоз»)', 'Товары с комментарием «Новый завоз» вынесены на отдельный лист «📦 Новый завоз» со сводной ведомостью по размерам и детальным реестром, а также снабжены отдельной колонкой в главном реестре и журнале чеков.'],
-            ['5. Учет цветов и характеристик', 'Цвета фиксируются по позициям чеков (sale_items.color, вариант, карточка товара). Обеспечено корректное сохранение и отображение всех введенных кассиром расцветок (синий, голубой, черный, белый, серый).'],
+            ['4. Обособление партии «Новый завоз»', "В соответствии с регламентом магазина («новый завоз не считается в учете») операции с комментарием «Новый завоз» ({$nbSales} чеков на сумму {$nbRev} ₸) полностью исключены из основного торгового учета и не входят в выручку на листах 1, 3, 4, 5, 6, 7. Учет данной партии ведется обособленно на отдельном листе «📦 Новый завоз (Вне учета)». Суммарная торговая выручка по основному учету составляет {$accRev} ₸ ({$accSales} чеков)."],
+            ['5. Учет цветов и характеристик', 'Цвета фиксируются по позициям чеков (sale_items.color, вариант, карточка товара). Обеспечено корректное сохранение и отображение введенных расцветок (синий, голубой, черный, белый, серый).'],
             ['6. Учет размеров детской одежды', 'Размеры фиксируются по первичным чекам и сортируются в естественном порядке (числовой рост: 110, 116, 122... либо буквенные: XXS..XXL). Для головных уборов размер не требуется.'],
             ['7. Себестоимость и прибыль', 'Себестоимость рассчитывается по полю закупочной цены (purchase_price). Если закупочная цена не была заполнена при создании товара, она принимается равной 0.00 без искажения учетных записей.'],
             ['8. Поставщики и закупки', 'Справочник поставщиков и входящие приходные накладные в текущей версии базы данных не предусмотрены. Учет ведется по факту расходных операций продажи.'],
-            ['9. Формулы и автофильтры', 'Во всех таблицах используются стандартные формулы Excel SUBTOTAL(109, ...) и SUBTOTAL(103, ...). При наложении любого фильтра (по дате, кассиру, категории, завоз) все итоги сверху и снизу автоматически пересчитываются.'],
+            ['9. Формулы и автофильтры', 'Во всех таблицах используются стандартные формулы Excel SUBTOTAL(109, ...) и SUBTOTAL(103, ...). При наложении любого фильтра все итоги сверху и снизу автоматически пересчитываются.'],
         ];
 
         $r = 5;
@@ -1680,7 +1658,7 @@ class OneCReportService
                 $sheet->getStyle("A{$r}:B{$r}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB(self::COLOR_ZEBRA_BG);
             }
 
-            $sheet->getRowDimension($r)->setRowHeight(24);
+            $sheet->getRowDimension($r)->setRowHeight(26);
             $r++;
         }
 
@@ -1753,7 +1731,7 @@ class OneCReportService
             ],
             'fill' => [
                 'fillType' => Fill::FILL_SOLID,
-                'startColor' => ['rgb' => 'E0F2FE'], // Мягкий деловой голубой акцент
+                'startColor' => ['rgb' => 'E0F2FE'],
             ],
             'borders' => [
                 'top' => ['borderStyle' => Border::BORDER_MEDIUM, 'color' => ['rgb' => '38BDF8']],

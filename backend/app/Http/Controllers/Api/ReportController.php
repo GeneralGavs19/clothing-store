@@ -125,6 +125,7 @@ class ReportController extends Controller
             'type' => $request->input('type'),
             'size' => $request->input('size'),
             'search' => $request->input('search'),
+            'include_new_batch' => $request->boolean('include_new_batch', false),
         ];
 
         $data = \App\Services\AnalyticsCacheService::remember($cacheParams, function () use ($request) {
@@ -142,10 +143,13 @@ class ReportController extends Controller
         $dateFrom = $dateFromStr ? Carbon::parse($dateFromStr)->startOfDay() : null;
         $dateTo = $dateToStr ? Carbon::parse($dateToStr)->endOfDay() : null;
 
-        $orderType = $request->input('order_type'); // 'in_stock' | 'on_order' | null
+        $orderType = $request->input('order_type'); // 'in_stock' | 'on_order' | 'new_batch' | null
         if (! $orderType && $request->has('is_on_order') && $request->input('is_on_order') !== null && $request->input('is_on_order') !== '') {
             $orderType = filter_var($request->input('is_on_order'), FILTER_VALIDATE_BOOLEAN) ? 'on_order' : 'in_stock';
         }
+
+        $includeNewBatch = $request->boolean('include_new_batch', false);
+        $newBatchOnly = $orderType === 'new_batch';
 
         $categoryId = $request->filled('category_id') ? (int) $request->input('category_id') : null;
         $searchTerm = $request->filled('search') ? trim($request->string('search')->toString()) : null;
@@ -160,6 +164,22 @@ class ReportController extends Controller
             ->leftJoin('product_variants', 'product_variants.id', '=', 'sale_items.product_variant_id')
             ->leftJoin('users as cashiers', 'cashiers.id', '=', 'sales.cashier_id')
             ->where('sales.status', 'approved');
+
+        // Обособление чеков с пометкой «Новый завоз» от основного магазинного учета
+        if ($newBatchOnly) {
+            $salesQuery->where(function ($q) {
+                $q->where('sales.cashier_note', 'like', '%завоз%')
+                  ->orWhere('sales.cashier_note', 'like', '%Завоз%');
+            });
+        } elseif (! $includeNewBatch) {
+            $salesQuery->where(function ($q) {
+                $q->whereNull('sales.cashier_note')
+                  ->orWhere(function ($sq) {
+                      $sq->where('sales.cashier_note', 'not like', '%завоз%')
+                         ->where('sales.cashier_note', 'not like', '%Завоз%');
+                  });
+            });
+        }
 
         if ($dateFrom) {
             $salesQuery->where(function ($q) use ($dateFrom) {
@@ -298,6 +318,21 @@ class ReportController extends Controller
                     $q->whereBetween('sales.approved_at', [$prevPeriodFrom->toIso8601String(), $prevPeriodTo->toIso8601String()])
                       ->orWhereBetween('sales.approved_at', [$prevPeriodFrom->toDateTimeString(), $prevPeriodTo->toDateTimeString()]);
                 });
+
+            if ($newBatchOnly) {
+                $prevSalesQuery->where(function ($q) {
+                    $q->where('sales.cashier_note', 'like', '%завоз%')
+                      ->orWhere('sales.cashier_note', 'like', '%Завоз%');
+                });
+            } elseif (! $includeNewBatch) {
+                $prevSalesQuery->where(function ($q) {
+                    $q->whereNull('sales.cashier_note')
+                      ->orWhere(function ($sq) {
+                          $sq->where('sales.cashier_note', 'not like', '%завоз%')
+                             ->where('sales.cashier_note', 'not like', '%Завоз%');
+                      });
+                });
+            }
 
             if ($orderType === 'on_order') {
                 $prevSalesQuery->where(function ($q) {
@@ -872,6 +907,11 @@ class ReportController extends Controller
                 'size' => $sizeFilter,
                 'category_id' => $categoryId,
                 'search' => $searchTerm,
+                'include_new_batch' => $includeNewBatch,
+            ],
+            'new_batch_isolated' => [
+                'is_excluded' => ! $includeNewBatch && ! $newBatchOnly,
+                'note' => 'Продажи с пометкой «Новый завоз» обособлены от основного учета магазина',
             ],
             'generated_at' => now()->toIso8601String(),
         ];
