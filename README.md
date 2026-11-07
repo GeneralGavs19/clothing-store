@@ -58,11 +58,6 @@ php artisan storage:link
 php artisan serve
 ```
 
-Первый вход после seed:
-
-- Email: `admin@store.local`
-- Password: `ChangeMe123!`
-
 Смените пароль администратора сразу после первого входа.
 
 ## Запуск frontend
